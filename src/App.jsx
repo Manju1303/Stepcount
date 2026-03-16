@@ -11,7 +11,8 @@ import {
   FileSpreadsheet,
   Zap,
   Loader2,
-  Trash2
+  Trash2,
+  AlertCircle
 } from 'lucide-react';
 import Tesseract from 'tesseract.js';
 import ExcelJS from 'exceljs';
@@ -24,32 +25,59 @@ const processScreenshot = async (image) => {
   const result = await Tesseract.recognize(image, 'eng');
   const text = result.data.text.toLowerCase();
   
-  // Basic regex to find step count (looking for numbers followed by 'steps')
-  const stepMatch = text.match(/(\d{1,3},?\d{3}|\d{1,5})\s*(steps|step)/i);
-  const steps = stepMatch ? parseInt(stepMatch[1].replace(',', '')) : 0;
+  // 1. Try to find number explicitly next to 'step' or 'steps'
+  const stepMatch = text.match(/(\d{1,3},?\d{3}|\d{3,5})\s*(?:steps|step)\b/i);
+  let steps = 0;
+  
+  if (stepMatch) {
+    steps = parseInt(stepMatch[1].replace(/,/g, ''));
+  } else {
+    // 2. Fallback: Google Fit & similar apps often don't have 'steps' right next to the number.
+    // Extract all numbers >= 1000 (like 6,153 or 6153) and pick the largest one.
+    // On a fitness dashboard, the step count is almost always the largest number.
+    const numMatches = text.match(/\b\d{1,2},\d{3}\b|\b\d{3,6}\b/g) || [];
+    const parsedNums = numMatches.map(n => parseInt(n.replace(/,/g, ''))).filter(n => n <= 100000);
+    if (parsedNums.length > 0) {
+      steps = Math.max(...parsedNums);
+    }
+  }
   
   // Date and Time (Attempting to find common patterns)
   // This is a naive implementation; in a real app, you'd want more robust parsing
   const now = new Date();
   const date = now.toLocaleDateString('en-CA'); // YYYY-MM-DD
   const time = now.toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit' });
+  const uploadedTime = now.toLocaleTimeString('en-US', { hour12: true, hour: '2-digit', minute: '2-digit', second: '2-digit' });
 
-  return { steps, date, time };
+  return { steps, date, time, uploadedTime };
 };
 
 const exportToExcelFull = async (records, title = 'Staff Step Count Report', staffMember = null) => {
   const workbook = new ExcelJS.Workbook();
   const worksheet = workbook.addWorksheet('Report');
 
+  // A4 and Page Alignment Setup
+  worksheet.pageSetup.paperSize = 9; // A4 size
+  worksheet.pageSetup.orientation = 'landscape';
+  worksheet.pageSetup.fitToPage = true;
+  worksheet.pageSetup.fitToWidth = 1;
+  worksheet.pageSetup.fitToHeight = 0;
+  worksheet.pageSetup.horizontalCentered = true;
+  worksheet.pageSetup.margins = {
+    left: 0.5, right: 0.5,
+    top: 0.5, bottom: 0.5,
+    header: 0.3, footer: 0.3
+  };
+
   // Title and Header
-  worksheet.mergeCells('A1:E1');
+  worksheet.mergeCells('A1:F1');
   const titleCell = worksheet.getCell('A1');
   titleCell.value = title;
   titleCell.font = { name: 'Arial', size: 16, bold: true };
   titleCell.alignment = { horizontal: 'center' };
 
   if (staffMember) {
-    worksheet.mergeCells('A2:E2');
+    worksheet.mergeCells('A2:F2');
     const subTitle = worksheet.getCell('A2');
     subTitle.value = `Staff: ${staffMember.name} | Dept: ${staffMember.dept}`;
     subTitle.font = { name: 'Arial', size: 12 };
@@ -63,16 +91,17 @@ const exportToExcelFull = async (records, title = 'Staff Step Count Report', sta
     { header: 'Steps', key: 'steps', width: 15 },
     { header: 'Name', key: 'name', width: 25 },
     { header: 'Department', key: 'dept', width: 25 },
+    { header: 'Uploaded Time', key: 'uploadedTime', width: 20 },
   ];
 
   // Table Header Styling
   const headerRow = worksheet.getRow(staffMember ? 4 : 3);
-  headerRow.values = ['S.No', 'Date', 'Steps', 'Name', 'Department'];
+  headerRow.values = ['S.No', 'Date', 'Steps', 'Name', 'Department', 'Uploaded Time'];
   headerRow.eachCell((cell) => {
     cell.font = { bold: true, color: { argb: 'FFFFFFFF' } };
     cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF000000' } };
     cell.border = { top: { style: 'thin' }, left: { style: 'thin' }, bottom: { style: 'thin' }, right: { style: 'thin' } };
-    cell.alignment = { horizontal: 'center' };
+    cell.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
   });
 
   // Data
@@ -83,12 +112,13 @@ const exportToExcelFull = async (records, title = 'Staff Step Count Report', sta
       rec.date,
       rec.steps,
       staff.name || 'N/A',
-      staff.dept || 'N/A'
+      staff.dept || 'N/A',
+      rec.uploadedTime || rec.time || 'N/A'
     ]);
     
     row.eachCell((cell) => {
       cell.border = { top: { style: 'thin' }, left: { style: 'thin' }, bottom: { style: 'thin' }, right: { style: 'thin' } };
-      cell.alignment = { horizontal: 'center' };
+      cell.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
     });
   });
 
@@ -124,11 +154,16 @@ const Login = ({ onLogin }) => {
     if (id === ADMIN_CREDENTIALS.id && password === ADMIN_CREDENTIALS.password) {
       onLogin({ role: 'admin', id });
     } else {
-      const staff = mockStaffMembers.find(s => s.id === id);
+      // Allow case-insensitive ID match for convenience
+      const staff = mockStaffMembers.find(s => s.id.toLowerCase() === id.toLowerCase());
       if (staff) {
-        onLogin({ role: 'staff', ...staff });
+        if (staff.password === password) {
+          onLogin({ role: 'staff', ...staff });
+        } else {
+          setError('Incorrect password');
+        }
       } else {
-        setError('Invalid ID. Please use S001, S002, etc.');
+        setError('Invalid ID. Please check your Staff ID.');
       }
     }
   };
@@ -169,6 +204,12 @@ const StaffDashboard = ({ user, records, setRecords }) => {
     setLoading(true);
     try {
       const extracted = await processScreenshot(preview);
+      
+      if (extracted.steps < 5000) {
+        setResult({ ...extracted, rejected: true });
+        return;
+      }
+      
       setResult(extracted);
       
       const newRecord = {
@@ -202,6 +243,9 @@ const StaffDashboard = ({ user, records, setRecords }) => {
     }
   };
 
+  const today = new Date().toLocaleDateString('en-CA');
+  const hasUploadedToday = records.some(r => r.staffId === user.id && r.date === today);
+
   const staffHistory = records.filter(r => r.staffId === user.id).sort((a, b) => b.id - a.id);
   const monthlyRecords = staffHistory.filter(r => r.date.startsWith(selectedMonth));
 
@@ -221,33 +265,48 @@ const StaffDashboard = ({ user, records, setRecords }) => {
             <p style={{ color: 'var(--text-muted)' }}>{user.dept}</p>
           </div>
           
-          <div className="upload-container" style={{ border: '2px dashed var(--glass-border)', padding: '2rem', borderRadius: '16px', textAlign: 'center', cursor: 'pointer' }}>
-            <input type="file" id="screenshot" hidden onChange={handleFileChange} accept="image/*" />
-            <label htmlFor="screenshot" style={{ cursor: 'pointer' }}>
-              <Upload size={40} style={{ marginBottom: '1rem', color: 'var(--primary)' }} />
-              <p>Click to upload screenshot</p>
-            </label>
-          </div>
+          {hasUploadedToday ? (
+            <div style={{ textAlign: 'center', padding: '2rem', background: 'rgba(34, 197, 94, 0.1)', borderRadius: '16px', border: '1px solid rgba(34, 197, 94, 0.2)' }}>
+              <CheckCircle2 size={40} color="var(--success)" style={{ margin: '0 auto 1rem' }} />
+              <h3 style={{ color: 'var(--success)' }}>Daily Submission Complete</h3>
+              <p style={{ color: 'var(--text-muted)', marginTop: '0.5rem' }}>You have already uploaded your step count for today. It cannot be changed or edited.</p>
+            </div>
+          ) : (
+            <>
+              <div className="upload-container" style={{ border: '2px dashed var(--glass-border)', padding: '2rem', borderRadius: '16px', textAlign: 'center', cursor: 'pointer' }}>
+                <input type="file" id="screenshot" hidden onChange={handleFileChange} accept="image/*" />
+                <label htmlFor="screenshot" style={{ cursor: 'pointer' }}>
+                  <Upload size={40} style={{ marginBottom: '1rem', color: 'var(--primary)' }} />
+                  <p>Click to upload screenshot</p>
+                </label>
+              </div>
 
-          {preview && (
-            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} style={{ marginTop: '1.5rem' }}>
-              <img src={preview} alt="preview" style={{ width: '100%', borderRadius: '12px', marginBottom: '1rem' }} />
-              <button onClick={handleUpload} disabled={loading} className="btn-primary" style={{ width: '100%' }}>
-                {loading ? <Loader2 className="animate-spin" /> : <BarChart3 size={20} />}
-                {loading ? 'Analyzing...' : 'Extract Data'}
-              </button>
-            </motion.div>
+              {preview && (
+                <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} style={{ marginTop: '1.5rem' }}>
+                  <img src={preview} alt="preview" style={{ width: '100%', borderRadius: '12px', marginBottom: '1rem' }} />
+                  <button onClick={handleUpload} disabled={loading} className="btn-primary" style={{ width: '100%' }}>
+                    {loading ? <Loader2 className="animate-spin" /> : <BarChart3 size={20} />}
+                    {loading ? 'Analyzing...' : 'Submit'}
+                  </button>
+                </motion.div>
+              )}
+            </>
           )}
 
           {result && (
-            <motion.div initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }} className="result-card" style={{ marginTop: '1rem', background: 'rgba(34, 197, 94, 0.1)', padding: '1rem', borderRadius: '12px', border: '1px solid rgba(34, 197, 94, 0.2)' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '10px', color: 'var(--success)', marginBottom: '0.5rem' }}>
-                <CheckCircle2 size={20} />
-                <b>Extraction Complete</b>
+            <motion.div initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }} className="result-card" style={{ marginTop: '1rem', background: result.rejected ? 'rgba(244, 63, 94, 0.1)' : 'rgba(34, 197, 94, 0.1)', padding: '1rem', borderRadius: '12px', border: `1px solid ${result.rejected ? 'rgba(244, 63, 94, 0.2)' : 'rgba(34, 197, 94, 0.2)'}` }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px', color: result.rejected ? 'var(--accent)' : 'var(--success)', marginBottom: '0.5rem' }}>
+                {result.rejected ? <AlertCircle size={20} /> : <CheckCircle2 size={20} />}
+                <b>{result.rejected ? 'Submission Rejected' : 'Extraction Complete'}</b>
               </div>
-              <p>Steps: <b>{result.steps}</b> {result.steps >= 5000 ? '✅ Target Met!' : '❌ Target Missed'}</p>
-              <p>Date: {result.date}</p>
-              <p>Time: {result.time}</p>
+              <p>Steps: <b>{result.steps}</b> {result.steps >= 5000 ? '✅ Target Met!' : '❌ Target Missed (Min. 5000 required)'}</p>
+              {!result.rejected && (
+                <>
+                  <p>Date: {result.date}</p>
+                  <p>Time: {result.time}</p>
+                  <p>Uploaded Time: {result.uploadedTime}</p>
+                </>
+              )}
             </motion.div>
           )}
         </div>
@@ -280,7 +339,7 @@ const StaffDashboard = ({ user, records, setRecords }) => {
                 <div key={rec.id} className="history-item" style={{ background: 'rgba(255, 255, 255, 0.03)', padding: '1rem', borderRadius: '12px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                   <div>
                     <h4 style={{ color: rec.steps >= 5000 ? 'var(--success)' : 'var(--text-main)' }}>{rec.steps} Steps</h4>
-                    <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>{rec.date} at {rec.time}</p>
+                    <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>{rec.date} at {rec.uploadedTime || rec.time}</p>
                   </div>
                   <div style={{ background: rec.steps >= 5000 ? 'var(--success)' : 'var(--accent)', padding: '4px 12px', borderRadius: '20px', fontSize: '0.7rem', fontWeight: 'bold' }}>
                     {rec.steps >= 5000 ? 'COMPLETED' : 'INCOMPLETE'}
@@ -349,6 +408,7 @@ const AdminDashboard = ({ records, setRecords }) => {
               <th>Department</th>
               <th>Steps</th>
               <th>Time</th>
+              <th>Uploaded Time</th>
               <th>Status</th>
               <th>Actions</th>
             </tr>
@@ -367,6 +427,7 @@ const AdminDashboard = ({ records, setRecords }) => {
                     {record ? record.steps : '---'}
                   </td>
                   <td>{record ? record.time : '---'}</td>
+                  <td>{record?.uploadedTime || record?.time || '---'}</td>
                   <td>
                     {record ? (
                       <motion.span 
