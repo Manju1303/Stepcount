@@ -30,10 +30,21 @@ const preprocessImage = (imageSrc) => {
       const canvas = document.createElement('canvas');
       const ctx = canvas.getContext('2d');
       
+      // Calculate crop region to isolate only the top circular dashboard of Google Fit.
+      // E.g., The ring and the number inside it, ignoring the entire bottom half (calories/miles/goals).
+      const cropWidth = img.width;
+      const cropHeight = img.height * 0.45; // Only keep the top 45% of the screenshot
+      
       // Scale up by 2x for significantly better OCR accuracy
-      canvas.width = img.width * 2;
-      canvas.height = img.height * 2;
-      ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+      canvas.width = cropWidth * 2;
+      canvas.height = cropHeight * 2;
+      
+      // Draw ONLY the cropped region
+      ctx.drawImage(
+        img, 
+        0, 0, cropWidth, cropHeight,        // Source rectangle
+        0, 0, canvas.width, canvas.height   // Destination rectangle
+      );
       
       // Apply Grayscale to improve Tesseract contrast
       const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
