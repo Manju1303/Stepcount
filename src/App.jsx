@@ -20,6 +20,8 @@ import Tesseract from 'tesseract.js';
 import ExcelJS from 'exceljs';
 import { saveAs } from 'file-saver';
 import { mockStaffMembers, ADMIN_CREDENTIALS } from './data';
+import { supabase } from './supabaseClient';
+
 
 // --- Services ---
 
@@ -303,28 +305,44 @@ const StaffDashboard = ({ user, records, setRecords }) => {
     }
   };
 
-  const handleFinalSubmit = () => {
+  const handleFinalSubmit = async () => {
     const stepsNum = result.steps;
     if (stepsNum < 5000 && !reason.trim()) {
       alert("Please provide a valid reason since your step count is below 5000.");
       return;
     }
     
-    const newRecord = {
-      id: Date.now(),
-      staffId: user.id,
-      ...result,
-      steps: stepsNum,
-      reason: stepsNum < 5000 ? reason : '',
-      image: preview
-    };
-    
-    const updatedRecords = [...records, newRecord];
-    setRecords(updatedRecords);
-    localStorage.setItem('step_records', JSON.stringify(updatedRecords));
-    
-    setFile(null);
-    setResult(null);
+    setLoading(true);
+    try {
+      const newRecord = {
+        staff_id: user.id,
+        steps: stepsNum,
+        date: result.date,
+        time: result.time,
+        uploaded_time: result.uploadedTime,
+        reason: stepsNum < 5000 ? reason : '',
+        dept: user.dept
+      };
+      
+      const { data, error } = await supabase
+        .from('step_records')
+        .insert([newRecord])
+        .select();
+
+      if (error) throw error;
+      
+      if (data) {
+        setRecords(prev => [...prev, data[0]]);
+        setFile(null);
+        setResult(null);
+        alert("Report submitted successfully to Cloud!");
+      }
+    } catch (err) {
+      console.error("Supabase Error:", err.message);
+      alert("Error saving to cloud: " + err.message);
+    } finally {
+      setLoading(false);
+    }
   };
 
   const handleFileChange = (e) => {
@@ -339,9 +357,9 @@ const StaffDashboard = ({ user, records, setRecords }) => {
   };
 
   const today = new Date().toLocaleDateString('en-CA');
-  const hasUploadedToday = records.some(r => r.staffId === user.id && r.date === today);
+  const hasUploadedToday = records.some(r => r.staff_id === user.id && r.date === today);
 
-  const staffHistory = records.filter(r => r.staffId === user.id).sort((a, b) => b.id - a.id);
+  const staffHistory = records.filter(r => r.staff_id === user.id).sort((a, b) => b.id - a.id);
   const monthlyRecords = staffHistory.filter(r => r.date.startsWith(selectedMonth));
 
   const handleMonthlyDownload = () => {
@@ -484,15 +502,15 @@ const AdminDashboard = ({ records, setRecords }) => {
   
   const filteredRecords = records.filter(r => r.date === selectedDate);
   const totalStaff = mockStaffMembers.length;
-  const completedToday = new Set(filteredRecords.filter(r => r.steps >= 5000 || r.reason).map(r => r.staffId)).size;
+  const completedToday = new Set(filteredRecords.filter(r => r.steps >= 5000 || r.reason).map(r => r.staff_id)).size;
 
   const departments = ['All', ...new Set(mockStaffMembers.map(s => s.dept))];
 
   let displayStaff = mockStaffMembers.filter(s => filterDept === 'All' || s.dept === filterDept);
 
   displayStaff.sort((a, b) => {
-    const recA = filteredRecords.find(r => r.staffId === a.id);
-    const recB = filteredRecords.find(r => r.staffId === b.id);
+    const recA = filteredRecords.find(r => r.staff_id === a.id);
+    const recB = filteredRecords.find(r => r.staff_id === b.id);
     const stepsA = recA ? recA.steps : -1;
     const stepsB = recB ? recB.steps : -1;
 
@@ -510,7 +528,7 @@ const AdminDashboard = ({ records, setRecords }) => {
   });
 
   const exportRecords = filteredRecords.filter(r => {
-    const staff = displayStaff.find(s => s.id === r.staffId);
+    const staff = displayStaff.find(s => s.id === r.staff_id);
     return staff !== undefined;
   }).sort((a, b) => {
     if (sortOrder === 'steps-high') return b.steps - a.steps;
@@ -522,10 +540,20 @@ const AdminDashboard = ({ records, setRecords }) => {
   const topPerformers = sortedByPerformance.slice(0, 3);
   const bottomPerformers = [...sortedByPerformance].reverse().slice(0, 3);
 
-  const handleDelete = (id) => {
-    const updated = records.filter(r => r.id !== id);
-    setRecords(updated);
-    localStorage.setItem('step_records', JSON.stringify(updated));
+  const handleDelete = async (id) => {
+    if (!confirm("Are you sure you want to delete this record from Cloud?")) return;
+    
+    try {
+      const { error } = await supabase
+        .from('step_records')
+        .delete()
+        .eq('id', id);
+
+      if (error) throw error;
+      setRecords(prev => prev.filter(r => r.id !== id));
+    } catch (err) {
+      alert("Delete failed: " + err.message);
+    }
   };
 
   return (
@@ -553,7 +581,7 @@ const AdminDashboard = ({ records, setRecords }) => {
             </h3>
             <div style={{ marginTop: '1rem', display: 'flex', flexDirection: 'column', gap: '0.8rem' }}>
               {topPerformers.map((r, i) => {
-                const staff = mockStaffMembers.find(s => s.id === r.staffId);
+                const staff = mockStaffMembers.find(s => s.id === r.staff_id);
                 return (
                   <div key={r.id} style={{ display: 'flex', justifyContent: 'space-between', padding: '0.8rem', background: 'rgba(255,255,255,0.03)', borderRadius: '8px' }}>
                     <div style={{ display: 'flex', gap: '1rem', alignItems: 'center' }}>
@@ -576,7 +604,7 @@ const AdminDashboard = ({ records, setRecords }) => {
             </h3>
             <div style={{ marginTop: '1rem', display: 'flex', flexDirection: 'column', gap: '0.8rem' }}>
               {bottomPerformers.map((r, i) => {
-                const staff = mockStaffMembers.find(s => s.id === r.staffId);
+                const staff = mockStaffMembers.find(s => s.id === r.staff_id);
                 return (
                   <div key={r.id} style={{ display: 'flex', justifyContent: 'space-between', padding: '0.8rem', background: 'rgba(255,255,255,0.03)', borderRadius: '8px' }}>
                     <div style={{ display: 'flex', gap: '1rem', alignItems: 'center' }}>
@@ -647,7 +675,7 @@ const AdminDashboard = ({ records, setRecords }) => {
           </thead>
           <tbody>
             {displayStaff.map(staff => {
-              const record = filteredRecords.find(r => r.staffId === staff.id);
+              const record = filteredRecords.find(r => r.staff_id === staff.id);
               return (
                 <tr key={staff.id} style={{ borderBottom: '1px solid var(--glass-border)' }}>
                   <td style={{ padding: '1rem' }}>
@@ -698,8 +726,18 @@ function App() {
   const [records, setRecords] = useState([]);
 
   useEffect(() => {
-    const saved = localStorage.getItem('step_records');
-    if (saved) setRecords(JSON.parse(saved));
+    const fetchCloudRecords = async () => {
+      try {
+        const { data, error } = await supabase
+          .from('step_records')
+          .select('*');
+        if (error) throw error;
+        setRecords(data || []);
+      } catch (err) {
+        console.error("Initial fetch error:", err);
+      }
+    };
+    fetchCloudRecords();
     
     const savedUser = localStorage.getItem('step_user');
     if (savedUser) setUser(JSON.parse(savedUser));
