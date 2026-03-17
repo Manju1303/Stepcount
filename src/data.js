@@ -10,6 +10,7 @@ export const mockStaffMembers = [
   // Department: CSE
   { id: "cse001", name: "Mrs. Renukadevi", dept: "AP/CSE", password: "1234" },
   { id: "cse002", name: "Suganthi", dept: "AP/CSE", password: "1234" },
+  { id: "cse003", name: "Adhiseshan ", dept: "AP/CSE", password: "1234" },
 
   // Technical Staff
   { id: "aids012", name: "Naveenkumar", dept: "Lab Technician", password: "1234" }

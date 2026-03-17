@@ -179,7 +179,18 @@ const exportToExcelFull = async (records, title = 'Staff Step Count Report', sta
   });
 
   // Data
-  records.forEach((rec, index) => {
+  // Sort records department-wise specifically for reports
+  const sortedRecords = [...records].sort((a, b) => {
+    const staffA = mockStaffMembers.find(s => s.id === a.staffId) || {};
+    const staffB = mockStaffMembers.find(s => s.id === b.staffId) || {};
+    const deptA = staffA.dept || '';
+    const deptB = staffB.dept || '';
+    if (deptA < deptB) return -1;
+    if (deptA > deptB) return 1;
+    return (staffA.name || '').localeCompare(staffB.name || '');
+  });
+
+  sortedRecords.forEach((rec, index) => {
     const staff = mockStaffMembers.find(s => s.id === rec.staffId) || {};
     const row = worksheet.addRow([
       index + 1,
