@@ -230,7 +230,7 @@ const Navbar = ({ user, onLogout }) => (
       <h2 className="title-gradient">Antigravity Steps</h2>
     </div>
     {user && (
-      <button onClick={onLogout} className="btn-primary" style={{ background: 'rgba(244, 63, 94, 0.1)', color: '#f43f5e', border: '1px solid rgba(244, 63, 94, 0.2)' }}>
+      <button onClick={onLogout} className="btn-primary" style={{ background: '#fee2e2', color: '#ef4444', border: '1px solid #fecaca' }}>
         <LogOut size={18} /> Logout
       </button>
     )}
@@ -409,15 +409,15 @@ const StaffDashboard = ({ user, records, setRecords }) => {
           )}
 
           {result && (
-            <motion.div initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }} className="result-card" style={{ marginTop: '1rem', background: 'rgba(34, 197, 94, 0.1)', padding: '1.5rem', borderRadius: '12px', border: '1px solid rgba(34, 197, 94, 0.2)' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '10px', color: 'var(--success)', marginBottom: '1rem' }}>
+            <motion.div initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }} className="result-card" style={{ marginTop: '1rem', background: '#f0fdf4', padding: '1.5rem', borderRadius: '12px', border: '1px solid #dcfce7' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px', color: '#166534', marginBottom: '1rem' }}>
                 <CheckCircle2 size={20} />
                 <b>Image Processed Successfully</b>
               </div>
 
               <div style={{ marginBottom: '1rem' }}>
                 <label style={{ display: 'block', marginBottom: '0.5rem', fontSize: '0.9rem', color: 'var(--text-muted)' }}>Extracted Steps Count:</label>
-                <div style={{ fontSize: '1.8rem', fontWeight: 'bold', color: 'var(--text-main)' }}>
+                <div style={{ fontSize: '1.8rem', fontWeight: 'bold', color: 'var(--primary)' }}>
                   {result.steps}
                 </div>
               </div>
@@ -431,12 +431,12 @@ const StaffDashboard = ({ user, records, setRecords }) => {
                     onChange={(e) => setReason(e.target.value)} 
                     placeholder="Enter reason here..." 
                     className="input-field" 
-                    style={{ border: '1px solid rgba(244, 63, 94, 0.5)' }} 
+                    style={{ border: '1px solid #fecaca' }} 
                   />
                 </div>
               )}
 
-              <div style={{ paddingBottom: '1.5rem', fontSize: '0.9rem' }}>
+              <div style={{ paddingBottom: '1.5rem', fontSize: '0.9rem', color: 'var(--text-muted)' }}>
                 <p>Date: {result.date}</p>
                 <p>Time: {result.time}</p>
               </div>
@@ -474,15 +474,15 @@ const StaffDashboard = ({ user, records, setRecords }) => {
               <p style={{ color: 'var(--text-muted)' }}>No records for this month.</p>
             ) : (
               monthlyRecords.map(rec => (
-                <div key={rec.id} className="history-item" style={{ background: 'rgba(255, 255, 255, 0.03)', padding: '1rem', borderRadius: '12px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <div key={rec.id} className="history-item" style={{ background: 'white', border: '1px solid #f1f5f9', padding: '1rem', borderRadius: '12px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', boxShadow: '0 2px 4px rgba(0,0,0,0.02)' }}>
                   <div>
-                    <h4 style={{ color: rec.steps >= 5000 || rec.reason ? 'var(--success)' : 'var(--text-main)' }}>
+                    <h4 style={{ color: rec.steps >= 5000 || rec.reason ? '#166534' : 'var(--text-main)' }}>
                       {rec.steps} Steps
                       {rec.reason && <span style={{ fontSize: '0.7rem', marginLeft: '6px', color: 'var(--text-muted)' }}>({rec.reason})</span>}
                     </h4>
                     <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>{rec.date} at {rec.uploadedTime || rec.time}</p>
                   </div>
-                  <div style={{ background: rec.steps >= 5000 || rec.reason ? 'var(--success)' : 'var(--accent)', padding: '4px 12px', borderRadius: '20px', fontSize: '0.7rem', fontWeight: 'bold' }}>
+                  <div style={{ background: rec.steps >= 5000 || rec.reason ? '#dcfce7' : '#fee2e2', color: rec.steps >= 5000 || rec.reason ? '#166534' : '#991b1b', padding: '4px 12px', borderRadius: '20px', fontSize: '0.7rem', fontWeight: 'bold' }}>
                     {rec.steps >= 5000 || rec.reason ? 'COMPLETED' : 'INCOMPLETE'}
                   </div>
                 </div>
@@ -583,15 +583,15 @@ const AdminDashboard = ({ records, setRecords }) => {
               {topPerformers.map((r, i) => {
                 const staff = mockStaffMembers.find(s => s.id === r.staff_id);
                 return (
-                  <div key={r.id} style={{ display: 'flex', justifyContent: 'space-between', padding: '0.8rem', background: 'rgba(255,255,255,0.03)', borderRadius: '8px' }}>
+                  <div key={r.id} style={{ display: 'flex', justifyContent: 'space-between', padding: '0.8rem', background: 'white', borderRadius: '8px', border: '1px solid #f1f5f9' }}>
                     <div style={{ display: 'flex', gap: '1rem', alignItems: 'center' }}>
-                      <span style={{ fontSize: '1.2rem', fontWeight: 'bold', color: i === 0 ? '#eab308' : 'var(--text-muted)' }}>#{i + 1}</span>
+                      <span style={{ fontSize: '1.2rem', fontWeight: 'bold', color: i === 0 ? '#eab308' : '#94a3b8' }}>#{i + 1}</span>
                       <div>
                         <b>{staff?.name}</b>
                         <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>{staff?.dept}</div>
                       </div>
                     </div>
-                    <b style={{ color: 'var(--success)', fontSize: '1.1rem' }}>{r.steps}</b>
+                    <b style={{ color: '#16a34a', fontSize: '1.1rem' }}>{r.steps}</b>
                   </div>
                 );
               })}
@@ -606,7 +606,7 @@ const AdminDashboard = ({ records, setRecords }) => {
               {bottomPerformers.map((r, i) => {
                 const staff = mockStaffMembers.find(s => s.id === r.staff_id);
                 return (
-                  <div key={r.id} style={{ display: 'flex', justifyContent: 'space-between', padding: '0.8rem', background: 'rgba(255,255,255,0.03)', borderRadius: '8px' }}>
+                  <div key={r.id} style={{ display: 'flex', justifyContent: 'space-between', padding: '0.8rem', background: 'white', borderRadius: '8px', border: '1px solid #f1f5f9' }}>
                     <div style={{ display: 'flex', gap: '1rem', alignItems: 'center' }}>
                       <div>
                         <b>{staff?.name}</b>
@@ -615,7 +615,7 @@ const AdminDashboard = ({ records, setRecords }) => {
                         </div>
                       </div>
                     </div>
-                    <b style={{ color: r.steps >= 5000 ? 'var(--text-main)' : 'var(--accent)', fontSize: '1.1rem' }}>{r.steps}</b>
+                    <b style={{ color: r.steps >= 5000 ? 'var(--text-main)' : '#dc2626', fontSize: '1.1rem' }}>{r.steps}</b>
                   </div>
                 );
               })}
@@ -683,7 +683,7 @@ const AdminDashboard = ({ records, setRecords }) => {
                     <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>ID: {staff.id}</div>
                   </td>
                   <td>{staff.dept}</td>
-                  <td style={{ fontWeight: 'bold', color: (record?.steps >= 5000 || record?.reason) ? 'var(--success)' : (record ? 'var(--accent)' : 'inherit') }}>
+                  <td style={{ fontWeight: 'bold', color: (record?.steps >= 5000 || record?.reason) ? '#16a34a' : (record ? '#dc2626' : 'inherit') }}>
                     {record ? record.steps : '---'}
                   </td>
                   <td>{record?.reason || '---'}</td>
@@ -693,9 +693,9 @@ const AdminDashboard = ({ records, setRecords }) => {
                       <motion.span 
                         animate={{ opacity: [1, 0.6, 1] }} 
                         transition={{ repeat: Infinity, duration: 2 }}
-                        style={{ color: (record.steps >= 5000 || record.reason) ? 'var(--success)' : 'var(--accent)', background: 'rgba(255,255,255,0.05)', padding: '4px 10px', borderRadius: '12px', fontSize: '0.8rem', display: 'inline-flex', alignItems: 'center', gap: '5px' }}
+                        style={{ color: (record.steps >= 5000 || record.reason) ? '#166534' : '#991b1b', background: (record.steps >= 5000 || record.reason) ? '#dcfce7' : '#fee2e2', padding: '4px 10px', borderRadius: '12px', fontSize: '0.8rem', display: 'inline-flex', alignItems: 'center', gap: '5px' }}
                       >
-                        <div style={{ width: 6, height: 6, borderRadius: '50%', background: (record.steps >= 5000 || record.reason) ? 'var(--success)' : 'var(--accent)' }} />
+                        <div style={{ width: 6, height: 6, borderRadius: '50%', background: (record.steps >= 5000 || record.reason) ? '#166534' : '#991b1b' }} />
                         {(record.steps >= 5000 || record.reason) ? 'Completed' : 'Partial'}
                       </motion.span>
                     ) : (
