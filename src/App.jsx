@@ -30,19 +30,24 @@ const preprocessImage = (imageSrc) => {
       const canvas = document.createElement('canvas');
       const ctx = canvas.getContext('2d');
       
-      // Calculate crop region to isolate only the top circular dashboard of Google Fit.
-      // E.g., The ring and the number inside it, ignoring the entire bottom half (calories/miles/goals).
-      const cropWidth = img.width;
-      const cropHeight = img.height * 0.45; // Only keep the top 45% of the screenshot
+      const isPortrait = img.height > img.width * 1.5;
       
-      // Scale up by 2x for significantly better OCR accuracy
-      canvas.width = cropWidth * 2;
-      canvas.height = cropHeight * 2;
+      // Calculate tight crop region to isolate ONLY the step count inside the circle.
+      // Google Fit screenshots have the step count exactly between 15% and 35% height.
+      // By starting at 15% and taking 20% height, we completely exclude the "Cal" column (which sits at ~40%).
+      const cropX = isPortrait ? img.width * 0.2 : 0;
+      const cropY = isPortrait ? img.height * 0.15 : 0;
+      const cropWidth = isPortrait ? img.width * 0.6 : img.width;
+      const cropHeight = isPortrait ? img.height * 0.20 : img.height; 
       
-      // Draw ONLY the cropped region
+      // Scale up by 2.5x for significantly better OCR accuracy
+      canvas.width = cropWidth * 2.5;
+      canvas.height = cropHeight * 2.5;
+      
+      // Draw ONLY the cropped target region
       ctx.drawImage(
         img, 
-        0, 0, cropWidth, cropHeight,        // Source rectangle
+        cropX, cropY, cropWidth, cropHeight,        // Source rectangle
         0, 0, canvas.width, canvas.height   // Destination rectangle
       );
       
