@@ -188,8 +188,8 @@ const exportToExcelFull = async (records, title = 'Staff Step Count Report', sta
   // Data
   // Sort records department-wise specifically for reports
   const sortedRecords = [...records].sort((a, b) => {
-    const staffA = mockStaffMembers.find(s => s.id === a.staffId) || {};
-    const staffB = mockStaffMembers.find(s => s.id === b.staffId) || {};
+    const staffA = mockStaffMembers.find(s => s.id === a.staff_id) || {};
+    const staffB = mockStaffMembers.find(s => s.id === b.staff_id) || {};
     const deptA = staffA.dept || '';
     const deptB = staffB.dept || '';
     if (deptA < deptB) return -1;
@@ -198,14 +198,14 @@ const exportToExcelFull = async (records, title = 'Staff Step Count Report', sta
   });
 
   sortedRecords.forEach((rec, index) => {
-    const staff = mockStaffMembers.find(s => s.id === rec.staffId) || {};
+    const staff = mockStaffMembers.find(s => s.id === rec.staff_id) || {};
     const row = worksheet.addRow([
       index + 1,
       rec.date,
       rec.steps,
       staff.name || 'N/A',
       staff.dept || 'N/A',
-      rec.uploadedTime || rec.time || 'N/A',
+      rec.uploaded_time || rec.time || 'N/A',
       rec.reason || '---'
     ]);
     
@@ -480,7 +480,7 @@ const StaffDashboard = ({ user, records, setRecords }) => {
                       {rec.steps} Steps
                       {rec.reason && <span style={{ fontSize: '0.7rem', marginLeft: '6px', color: 'var(--text-muted)' }}>({rec.reason})</span>}
                     </h4>
-                    <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>{rec.date} at {rec.uploadedTime || rec.time}</p>
+                    <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>{rec.date} at {rec.uploaded_time || rec.time}</p>
                   </div>
                   <div style={{ background: rec.steps >= 5000 || rec.reason ? '#dcfce7' : '#fee2e2', color: rec.steps >= 5000 || rec.reason ? '#166534' : '#991b1b', padding: '4px 12px', borderRadius: '20px', fontSize: '0.7rem', fontWeight: 'bold' }}>
                     {rec.steps >= 5000 || rec.reason ? 'COMPLETED' : 'INCOMPLETE'}
@@ -687,7 +687,7 @@ const AdminDashboard = ({ records, setRecords }) => {
                     {record ? record.steps : '---'}
                   </td>
                   <td>{record?.reason || '---'}</td>
-                  <td>{record?.uploadedTime || record?.time || '---'}</td>
+                  <td>{record?.uploaded_time || record?.time || '---'}</td>
                   <td>
                     {record ? (
                       <motion.span 
