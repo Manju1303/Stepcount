@@ -175,14 +175,18 @@ const exportToExcelFull = async (records, title = 'Staff Step Count Report', sta
   });
 
   sortedRecords.forEach((rec, index) => {
-    const staff = mockStaffMembers.find(s => s.id === rec.staff_id) || {};
+    // Robust lookup: DB values first, then mock mapping as fallback
+    const staffMapping = mockStaffMembers.find(s => s.id === rec.staff_id) || {};
+    const finalName = rec.name || staffMapping.name || 'N/A';
+    const finalDept = rec.department || rec.dept || staffMapping.dept || 'N/A';
+
     const row = worksheet.addRow([
       index + 1,
       rec.date,
       rec.steps,
-      staff.name || 'N/A',
-      staff.dept || 'N/A',
-      rec.uploaded_time || rec.time || 'N/A',
+      finalName,
+      finalDept,
+      rec.uploaded_time || rec.uploadedTime || rec.time || 'N/A',
       rec.reason || '---'
     ]);
     
@@ -298,12 +302,14 @@ const StaffDashboard = ({ user, records, setRecords }) => {
     try {
       const newRecord = {
         staff_id: user.id,
+        name: user.name,
+        dept: user.dept,
+        department: user.dept,
         steps: stepsNum,
         date: result.date,
         time: result.time,
         uploaded_time: result.uploadedTime,
-        reason: stepsNum < 5000 ? reason : '',
-        dept: user.dept
+        reason: (stepsNum < 5000 && !reason.trim()) ? 'Steps below daily target (< 5000)' : reason,
       };
       
       const { data, error } = await supabase
