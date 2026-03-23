@@ -34,26 +34,20 @@ const preprocessImage = (imageSrc) => {
       
       const isPortrait = img.height > img.width * 1.5;
       
-      // Calculate tight crop region to isolate ONLY the step count inside the circle.
-      // Google Fit screenshots have the step count exactly between 15% and 35% height.
-      // By starting at 15% and taking 20% height, we completely exclude the "Cal" column (which sits at ~40%).
       const cropX = isPortrait ? img.width * 0.2 : 0;
       const cropY = isPortrait ? img.height * 0.15 : 0;
       const cropWidth = isPortrait ? img.width * 0.6 : img.width;
       const cropHeight = isPortrait ? img.height * 0.20 : img.height; 
       
-      // Scale up by 2.5x for significantly better OCR accuracy
       canvas.width = cropWidth * 2.5;
       canvas.height = cropHeight * 2.5;
       
-      // Draw ONLY the cropped target region
       ctx.drawImage(
         img, 
-        cropX, cropY, cropWidth, cropHeight,        // Source rectangle
-        0, 0, canvas.width, canvas.height   // Destination rectangle
+        cropX, cropY, cropWidth, cropHeight,
+        0, 0, canvas.width, canvas.height
       );
       
-      // Apply Grayscale to improve Tesseract contrast
       const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
       const data = imgData.data;
       for (let i = 0; i < data.length; i += 4) {
@@ -73,36 +67,29 @@ const processScreenshot = async (image) => {
   const result = await Tesseract.recognize(processedImage, 'eng');
   let text = result.data.text.toLowerCase();
   
-  // Clean up commas for numbers
   text = text.replace(/,/g, ''); 
   
-  // Tokenize everything by whitespace to ignore terrible OCR layout issues
   const rawTokens = text.split(/\s+/).filter(t => t.trim() !== '');
   
-  // 1. Token-based scrubbing: remove statistics we DO NOT want (Calories, Miles, Minutes, etc.)
   let tokens = [];
   for (let i = 0; i < rawTokens.length; i++) {
     const t = rawTokens[i];
     
-    // Check for multi-word labels like "move min"
     if (t === 'move' && (rawTokens[i+1] === 'min' || rawTokens[i+1] === 'mins')) {
-      if (tokens.length > 0 && /^\d+(\.\d+)?$/.test(tokens[tokens.length - 1])) tokens.pop(); // Remove the number
-      i++; // Skip 'min'
+      if (tokens.length > 0 && /^\d+(\.\d+)?$/.test(tokens[tokens.length - 1])) tokens.pop();
+      i++;
       continue;
     }
     
-    // Check for single-word labels (cal, mi, etc) and kill the number immediately preceding them
     if (/^(cal|kcal|calories|mi|miles|km|kilometers|min|mins|minutes|bpm|kg|lbs)$/i.test(t)) {
       if (tokens.length > 0 && /^\d+(\.\d+)?$/.test(tokens[tokens.length - 1])) tokens.pop(); 
       continue; 
     }
     
-    // Remove years to prevent accidental extraction
     if (/^(2023|2024|2025|2026)$/.test(t)) {
       continue;
     }
 
-    // Fix broken split numbers (e.g. '10' and '743' -> '10743')
     if (tokens.length > 0 && /^\d{1,2}$/.test(tokens[tokens.length - 1]) && /^\d{3}$/.test(t)) {
        tokens[tokens.length - 1] = tokens[tokens.length - 1] + t;
        continue;
@@ -113,20 +100,15 @@ const processScreenshot = async (image) => {
   
   let steps = 0;
 
-  // 2. Google Fit Target Logic
-  // At this point, all calories/miles/minutes are completely deleted.
-  // The only numbers remaining are Heart Points (small) and Steps (large).
-  // We can safely grab the absolute largest number left on the screen.
   const nums = tokens.filter(t => /^\d+$/.test(t)).map(n => parseInt(n));
-  const validNums = nums.filter(n => n <= 150000); // Sanity limit for max achievable steps
+  const validNums = nums.filter(n => n <= 150000);
   
   if (validNums.length > 0) {
      steps = Math.max(...validNums);
   }
   
-  // Date and Time bounds
   const now = new Date();
-  const date = now.toLocaleDateString('en-CA'); // YYYY-MM-DD
+  const date = now.toLocaleDateString('en-CA');
   const time = now.toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit' });
   const uploadedTime = now.toLocaleTimeString('en-US', { hour12: true, hour: '2-digit', minute: '2-digit', second: '2-digit' });
 
@@ -137,8 +119,7 @@ const exportToExcelFull = async (records, title = 'Staff Step Count Report', sta
   const workbook = new ExcelJS.Workbook();
   const worksheet = workbook.addWorksheet('Report');
 
-  // A4 and Page Alignment Setup
-  worksheet.pageSetup.paperSize = 9; // A4 size
+  worksheet.pageSetup.paperSize = 9;
   worksheet.pageSetup.orientation = 'landscape';
   worksheet.pageSetup.fitToPage = true;
   worksheet.pageSetup.fitToWidth = 1;
@@ -150,7 +131,6 @@ const exportToExcelFull = async (records, title = 'Staff Step Count Report', sta
     header: 0.3, footer: 0.3
   };
 
-  // Title and Header
   worksheet.mergeCells('A1:G1');
   const titleCell = worksheet.getCell('A1');
   titleCell.value = title;
@@ -171,11 +151,10 @@ const exportToExcelFull = async (records, title = 'Staff Step Count Report', sta
     { header: 'Steps', key: 'steps', width: 15 },
     { header: 'Name', key: 'name', width: 25 },
     { header: 'Department', key: 'dept', width: 25 },
-    { header: 'Uploaded Time', key: 'uploadedTime', width: 20 },
+    { header: 'Uploaded Time', key: 'uploaded_time', width: 20 },
     { header: 'Reason', key: 'reason', width: 25 },
   ];
 
-  // Table Header Styling
   const headerRow = worksheet.getRow(staffMember ? 4 : 3);
   headerRow.values = ['S.No', 'Date', 'Steps', 'Name', 'Department', 'Uploaded Time', 'Reason'];
   headerRow.eachCell((cell) => {
@@ -185,8 +164,6 @@ const exportToExcelFull = async (records, title = 'Staff Step Count Report', sta
     cell.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
   });
 
-  // Data
-  // Sort records department-wise specifically for reports
   const sortedRecords = [...records].sort((a, b) => {
     const staffA = mockStaffMembers.find(s => s.id === a.staff_id) || {};
     const staffB = mockStaffMembers.find(s => s.id === b.staff_id) || {};
@@ -209,6 +186,12 @@ const exportToExcelFull = async (records, title = 'Staff Step Count Report', sta
       rec.reason || '---'
     ]);
     
+    // Color red rows where steps < 5000
+    const stepsCell = row.getCell(3);
+    if (rec.steps < 5000) {
+      stepsCell.font = { bold: true, color: { argb: 'FFCC0000' } };
+    }
+
     row.eachCell((cell) => {
       cell.border = { top: { style: 'thin' }, left: { style: 'thin' }, bottom: { style: 'thin' }, right: { style: 'thin' } };
       cell.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
@@ -247,7 +230,6 @@ const Login = ({ onLogin }) => {
     if (id === ADMIN_CREDENTIALS.id && password === ADMIN_CREDENTIALS.password) {
       onLogin({ role: 'admin', id });
     } else {
-      // Allow case-insensitive ID match for convenience
       const staff = mockStaffMembers.find(s => s.id.toLowerCase() === id.toLowerCase());
       if (staff) {
         if (staff.password === password) {
@@ -267,7 +249,7 @@ const Login = ({ onLogin }) => {
       <form onSubmit={handleSubmit}>
         <div style={{ marginBottom: '1rem' }}>
           <label style={{ display: 'block', marginBottom: '0.5rem', color: 'var(--text-muted)' }}>Staff/Admin ID</label>
-          <input className="input-field" type="text" value={id} onChange={(e) => setId(e.target.value)} placeholder="Enter ID (e.g. S001)" required />
+          <input className="input-field" type="text" value={id} onChange={(e) => setId(e.target.value)} placeholder="Enter ID" required />
         </div>
         <div style={{ marginBottom: '1.5rem' }}>
           <label style={{ display: 'block', marginBottom: '0.5rem', color: 'var(--text-muted)' }}>Password</label>
@@ -288,7 +270,7 @@ const StaffDashboard = ({ user, records, setRecords }) => {
   const [preview, setPreview] = useState(null);
   const [result, setResult] = useState(null);
   const [reason, setReason] = useState('');
-  const [selectedMonth, setSelectedMonth] = useState(new Date().toISOString().substring(0, 7)); // YYYY-MM
+  const [selectedMonth, setSelectedMonth] = useState(new Date().toISOString().substring(0, 7));
 
   const handleExtract = async () => {
     if (!file) return;
@@ -379,7 +361,7 @@ const StaffDashboard = ({ user, records, setRecords }) => {
           </div>
           
           {hasUploadedToday ? (
-            <div style={{ textAlign: 'center', padding: '2rem', background: 'rgba(34, 197, 94, 0.1)', borderRadius: '16px', border: '1px solid rgba(34, 197, 94, 0.2)' }}>
+            <div style={{ textAlign: 'center', padding: '2rem', background: '#f0fdf4', borderRadius: '16px', border: '1px solid #dcfce7' }}>
               <CheckCircle2 size={40} color="var(--success)" style={{ margin: '0 auto 1rem' }} />
               <h3 style={{ color: 'var(--success)' }}>Daily Submission Complete</h3>
               <p style={{ color: 'var(--text-muted)', marginTop: '0.5rem' }}>You have already uploaded your step count for today. It cannot be changed or edited.</p>
@@ -424,7 +406,7 @@ const StaffDashboard = ({ user, records, setRecords }) => {
 
               {result.steps < 5000 && (
                 <div style={{ marginBottom: '1rem' }}>
-                  <label style={{ display: 'block', marginBottom: '0.5rem', fontSize: '0.9rem', color: 'var(--accent)' }}>Steps are below 5000. Please provide a reason (e.g., On-Duty, Sick):</label>
+                  <label style={{ display: 'block', marginBottom: '0.5rem', fontSize: '0.9rem', color: 'var(--accent)' }}>Steps are below 5000. Please provide a reason:</label>
                   <input 
                     type="text" 
                     value={reason} 
@@ -498,7 +480,7 @@ const StaffDashboard = ({ user, records, setRecords }) => {
 const AdminDashboard = ({ records, setRecords }) => {
   const [selectedDate, setSelectedDate] = useState(new Date().toLocaleDateString('en-CA'));
   const [filterDept, setFilterDept] = useState('All');
-  const [sortOrder, setSortOrder] = useState('time'); // time, steps-high, steps-low
+  const [sortOrder, setSortOrder] = useState('time'); 
   
   const filteredRecords = records.filter(r => r.date === selectedDate);
   const totalStaff = mockStaffMembers.length;
@@ -520,8 +502,6 @@ const AdminDashboard = ({ records, setRecords }) => {
         const sb = recB ? recB.steps : 999999;
         return sa - sb;
     }
-    
-    // Default time based (recent first)
     const timeA = recA ? recA.id : 0;
     const timeB = recB ? recB.id : 0;
     return timeB - timeA;
