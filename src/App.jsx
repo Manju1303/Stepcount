@@ -120,36 +120,37 @@ const exportToExcelFull = async (records, title = 'Staff Step Count Report', sta
   const worksheet = workbook.addWorksheet('Report');
 
   worksheet.pageSetup.paperSize = 9; // A4
-  worksheet.pageSetup.orientation = 'landscape';
+  worksheet.pageSetup.orientation = 'portrait';
   worksheet.pageSetup.fitToPage = true;
   worksheet.pageSetup.fitToWidth = 1;
   worksheet.pageSetup.fitToHeight = 0;
   worksheet.pageSetup.horizontalCentered = true;
   worksheet.pageSetup.margins = {
-    left: 0.5, right: 0.5,
-    top: 0.75, bottom: 0.75,
+    left: 0.3, right: 0.3,
+    top: 0.5, bottom: 0.5,
     header: 0.3, footer: 0.3
   };
 
   // Add Page Header/Footer
-  worksheet.headerFooter.oddHeader = `&C&16&B${title.toUpperCase()}`;
+  worksheet.headerFooter.oddHeader = `&C&14&B${title.toUpperCase()}`;
   worksheet.headerFooter.oddFooter = `&L&D &T &CPage &P of &N &RAntigravity Step Monitoring`;
 
   worksheet.mergeCells('A1:G1');
   const titleCell = worksheet.getCell('A1');
   titleCell.value = title.toUpperCase();
-  titleCell.font = { name: 'Arial Black', size: 20, bold: true, color: { argb: 'FF1E293B' } };
+  titleCell.font = { name: 'Arial Black', size: 16, bold: true, color: { argb: 'FF1E293B' } };
   titleCell.alignment = { horizontal: 'center', vertical: 'middle' };
-  worksheet.getRow(1).height = 40;
+  worksheet.getRow(1).height = 35;
 
-  // Set standard column widths for A4 landscape
-  worksheet.getColumn(1).width = 8;  // S.No
-  worksheet.getColumn(2).width = 15; // Date
-  worksheet.getColumn(3).width = 15; // Steps
-  worksheet.getColumn(4).width = 30; // Name
-  worksheet.getColumn(5).width = 25; // Department
-  worksheet.getColumn(6).width = 20; // Uploaded Time
-  worksheet.getColumn(7).width = 35; // Reason
+  // Set compressed column widths for A4 portrait
+  worksheet.getColumn(1).width = 6;  // S.No
+  worksheet.getColumn(2).width = 12; // Date
+  worksheet.getColumn(3).width = 10; // Steps
+  worksheet.getColumn(4).width = 25; // Name
+  worksheet.getColumn(5).width = 20; // Department
+  worksheet.getColumn(6).width = 15; // Uploaded Time
+  worksheet.getColumn(7).width = 25; // Reason
+
 
 
   if (staffMember) {
