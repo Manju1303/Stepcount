@@ -115,7 +115,7 @@ const processScreenshot = async (image) => {
   return { steps, date, time, uploadedTime };
 };
 
-const exportToExcelFull = async (records, title = 'Staff Step Count Report', staffMember = null) => {
+const exportToExcelFull = async (records, title = 'Staff Step Count Report', staffMember = null, allExpectedStaff = null) => {
   const workbook = new ExcelJS.Workbook();
   const worksheet = workbook.addWorksheet('Report');
 
@@ -131,76 +131,177 @@ const exportToExcelFull = async (records, title = 'Staff Step Count Report', sta
     header: 0.3, footer: 0.3
   };
 
+  // 1. Main Title Header
   worksheet.mergeCells('A1:G1');
   const titleCell = worksheet.getCell('A1');
-  titleCell.value = title;
-  titleCell.font = { name: 'Arial', size: 16, bold: true };
-  titleCell.alignment = { horizontal: 'center' };
+  titleCell.value = title.toUpperCase();
+  titleCell.font = { name: 'Arial Black', size: 20, bold: true, color: { argb: 'FF1E293B' } };
+  titleCell.alignment = { horizontal: 'center', vertical: 'middle' };
+  worksheet.getRow(1).height = 40;
 
   if (staffMember) {
     worksheet.mergeCells('A2:G2');
     const subTitle = worksheet.getCell('A2');
-    subTitle.value = `Staff: ${staffMember.name} | Dept: ${staffMember.dept}`;
-    subTitle.font = { name: 'Arial', size: 12 };
+    subTitle.value = `MONTHLY PERFORMANCE REPORT: ${staffMember.name} (ID: ${staffMember.id}) | DEPARTMENT: ${staffMember.dept}`;
+    subTitle.font = { name: 'Arial', size: 12, bold: true, color: { argb: 'FF475569' } };
     subTitle.alignment = { horizontal: 'center' };
+    worksheet.getRow(2).height = 25;
   }
 
-  worksheet.columns = [
-    { header: 'S.No', key: 'sno', width: 10 },
-    { header: 'Date', key: 'date', width: 15 },
-    { header: 'Steps', key: 'steps', width: 15 },
-    { header: 'Name', key: 'name', width: 25 },
-    { header: 'Department', key: 'dept', width: 25 },
-    { header: 'Uploaded Time', key: 'uploaded_time', width: 20 },
-    { header: 'Reason', key: 'reason', width: 25 },
-  ];
+  // Helper to get clean department name
+  const getDept = (r) => {
+    let d = r.department || r.dept || mockStaffMembers.find(s => s.id === r.staff_id)?.dept || 'N/A';
+    if (d.toUpperCase().includes('AI&DS') || d.toUpperCase().includes('AIDS')) return 'AI&DS';
+    if (d.toUpperCase().includes('CSE')) return 'CSE';
+    return d.includes('/') ? d.split('/')[1].trim() : d.trim();
+  };
 
-  const headerRow = worksheet.getRow(staffMember ? 4 : 3);
-  headerRow.values = ['S.No', 'Date', 'Steps', 'Name', 'Department', 'Uploaded Time', 'Reason'];
-  headerRow.eachCell((cell) => {
-    cell.font = { bold: true, color: { argb: 'FFFFFFFF' } };
-    cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF000000' } };
-    cell.border = { top: { style: 'thin' }, left: { style: 'thin' }, bottom: { style: 'thin' }, right: { style: 'thin' } };
-    cell.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
-  });
+  const addTableHeader = (y) => {
+    const headerRow = worksheet.getRow(y);
+    headerRow.values = ['S.No', 'Date', 'Steps', 'Name', 'Department', 'Uploaded Time', 'Reason'];
+    headerRow.eachCell((cell) => {
+      cell.font = { bold: true, color: { argb: 'FFFFFFFF' } };
+      cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1E293B' } };
+      cell.border = { top: { style: 'thin' }, left: { style: 'thin' }, bottom: { style: 'thin' }, right: { style: 'thin' } };
+      cell.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
+    });
+    headerRow.height = 25;
+    return headerRow;
+  };
 
-  const sortedRecords = [...records].sort((a, b) => {
-    const staffA = mockStaffMembers.find(s => s.id === a.staff_id) || {};
-    const staffB = mockStaffMembers.find(s => s.id === b.staff_id) || {};
-    const deptA = staffA.dept || '';
-    const deptB = staffB.dept || '';
-    if (deptA < deptB) return -1;
-    if (deptA > deptB) return 1;
-    return (staffA.name || '').localeCompare(staffB.name || '');
-  });
-
-  sortedRecords.forEach((rec, index) => {
-    // Robust lookup: DB values first, then mock mapping as fallback
-    const staffMapping = mockStaffMembers.find(s => s.id === rec.staff_id) || {};
-    const finalName = rec.name || staffMapping.name || 'N/A';
-    const finalDept = rec.department || rec.dept || staffMapping.dept || 'N/A';
-
-    const row = worksheet.addRow([
-      index + 1,
-      rec.date,
-      rec.steps,
-      finalName,
-      finalDept,
-      rec.uploaded_time || rec.uploadedTime || rec.time || 'N/A',
-      rec.reason || '---'
-    ]);
-    
-    // Color red rows where steps < 5000
-    const stepsCell = row.getCell(3);
-    if (rec.steps < 5000) {
-      stepsCell.font = { bold: true, color: { argb: 'FFCC0000' } };
-    }
-
+  const applyDataStyle = (row) => {
     row.eachCell((cell) => {
       cell.border = { top: { style: 'thin' }, left: { style: 'thin' }, bottom: { style: 'thin' }, right: { style: 'thin' } };
       cell.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
     });
-  });
+  };
+
+  let gSNo = 1;
+
+  // CASE 1: INDIVIDUAL STAFF REPORT
+  if (staffMember) {
+    addTableHeader(4);
+    const sorted = [...records].sort((a, b) => new Date(b.date) - new Date(a.date));
+    sorted.forEach((rec, idx) => {
+      const row = worksheet.addRow([
+        idx + 1,
+        rec.date,
+        rec.steps,
+        rec.name || staffMember.name,
+        getDept(rec),
+        rec.uploaded_time || rec.time || 'N/A',
+        rec.reason || '---'
+      ]);
+      applyDataStyle(row);
+      if (rec.steps < 5000) row.getCell(3).font = { bold: true, color: { argb: 'FFEF4444' } };
+    });
+  } 
+  // CASE 2: ADMIN REPORT (TABLE PER DEPARTMENT)
+  else {
+    const completed = records.filter(r => r.steps >= 5000);
+    const incomplete = records.filter(r => r.steps < 5000);
+
+    // 1. Tables for Each Department
+    const depts = [...new Set(completed.map(getDept))].sort();
+    
+    depts.forEach(deptName => {
+      worksheet.addRow([]); // Spacer
+      worksheet.addRow([]); // Spacer
+      
+      const deptBanner = worksheet.addRow([`TABLE: STAFF REPORT - DEPARTMENT OF ${deptName}`]);
+      worksheet.mergeCells(`A${deptBanner.number}:G${deptBanner.number}`);
+      deptBanner.font = { bold: true, size: 14, color: { argb: 'FFFFFFFF' } };
+      deptBanner.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF3B82F6' } };
+      deptBanner.alignment = { horizontal: 'center' };
+      deptBanner.height = 30;
+
+      addTableHeader(worksheet.lastRow.number + 1);
+
+      const deptRecords = completed.filter(r => getDept(r) === deptName).sort((a,b) => (a.name||'').localeCompare(b.name||''));
+      deptRecords.forEach(rec => {
+        const staffMap = mockStaffMembers.find(s => s.id === rec.staff_id) || {};
+        const row = worksheet.addRow([
+          gSNo++,
+          rec.date,
+          rec.steps,
+          rec.name || staffMap.name || 'N/A',
+          deptName,
+          rec.uploaded_time || rec.time || 'N/A',
+          rec.reason || '---'
+        ]);
+        applyDataStyle(row);
+      });
+    });
+
+    // 2. Incomplete Table at the End
+    if (incomplete.length > 0) {
+      worksheet.addRow([]);
+      worksheet.addRow([]);
+      worksheet.addRow([]);
+      
+      const incBanner = worksheet.addRow(['TABLE: INCOMPLETE SUBMISSIONS (BELOW 5000 STEPS)']);
+      worksheet.mergeCells(`A${incBanner.number}:G${incBanner.number}`);
+      incBanner.font = { bold: true, size: 14, color: { argb: 'FFFFFFFF' } };
+      incBanner.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFEF4444' } }; // Red for incomplete
+      incBanner.alignment = { horizontal: 'center' };
+      incBanner.height = 30;
+
+      addTableHeader(worksheet.lastRow.number + 1);
+
+      incomplete.forEach(rec => {
+        const staffMap = mockStaffMembers.find(s => s.id === rec.staff_id) || {};
+        const row = worksheet.addRow([
+          gSNo++,
+          rec.date,
+          rec.steps,
+          rec.name || staffMap.name || 'N/A',
+          getDept(rec),
+          rec.uploaded_time || rec.time || 'N/A',
+          rec.reason || '---'
+        ]);
+        applyDataStyle(row);
+        row.getCell(3).font = { bold: true, color: { argb: 'FFEF4444' } };
+        row.getCell(7).font = { bold: true, color: { argb: 'FFEF4444' } };
+      });
+    }
+
+    // 3. Pending Table
+    if (allExpectedStaff) {
+      const pendingStaff = allExpectedStaff.filter(s => !records.some(r => r.staff_id === s.id));
+      if (pendingStaff.length > 0) {
+        worksheet.addRow([]);
+        worksheet.addRow([]);
+        
+        const penBanner = worksheet.addRow(['TABLE: PENDING SUBMISSIONS (NOT YET UPLOADED)']);
+        worksheet.mergeCells(`A${penBanner.number}:G${penBanner.number}`);
+        penBanner.font = { bold: true, size: 14, color: { argb: 'FFFFFFFF' } };
+        penBanner.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF64748B' } }; // Gray for pending
+        penBanner.alignment = { horizontal: 'center' };
+        penBanner.height = 30;
+
+        const pHead = worksheet.addRow(['S.No', 'Date', 'Steps', 'Name', 'Department', 'Status', 'Notes']);
+        pHead.eachCell(c => {
+          c.font = { bold: true, color: { argb: 'FFFFFFFF' } };
+          c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF334155' } };
+          c.border = { top: {style:'thin'}, left: {style:'thin'}, bottom: {style:'thin'}, right: {style:'thin'} };
+          c.alignment = { horizontal: 'center' };
+        });
+
+        pendingStaff.forEach((staff) => {
+          const row = worksheet.addRow([
+            gSNo++,
+            records.length > 0 ? records[0].date : new Date().toLocaleDateString('en-CA'),
+            '---',
+            staff.name,
+            staff.dept,
+            'PENDING',
+            'No report discovered for this date'
+          ]);
+          applyDataStyle(row);
+        });
+      }
+    }
+  }
 
   const buffer = await workbook.xlsx.writeBuffer();
   saveAs(new Blob([buffer]), `${title.replace(/\s+/g, '_')}.xlsx`);
@@ -639,7 +740,7 @@ const AdminDashboard = ({ records, setRecords }) => {
             </div>
 
             <button 
-              onClick={() => exportToExcelFull(exportRecords, `Daily Report - ${selectedDate}`)} 
+              onClick={() => exportToExcelFull(exportRecords, `Daily Report - ${selectedDate}`, null, displayStaff)} 
               className="btn-primary" style={{ padding: '0.5rem 1rem', height: '38px' }}
             >
               <FileSpreadsheet size={18} /> Export Filtered
