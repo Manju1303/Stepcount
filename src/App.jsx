@@ -490,14 +490,10 @@ const StaffDashboard = ({ user, records, setRecords }) => {
               </div>
 
               <div style={{ marginBottom: '1rem' }}>
-                <label style={{ display: 'block', marginBottom: '0.5rem', fontSize: '0.9rem', color: 'var(--text-muted)' }}>Validate/Correct Steps Count:</label>
-                <input 
-                  type="number"
-                  value={result.steps}
-                  onChange={(e) => setResult({...result, steps: parseInt(e.target.value) || 0})}
-                  className="input-field"
-                  style={{ fontSize: '1.8rem', fontWeight: 'bold', color: 'var(--primary)', textAlign: 'center' }}
-                />
+                <label style={{ display: 'block', marginBottom: '0.5rem', fontSize: '0.9rem', color: 'var(--text-muted)' }}>Extracted Steps Count:</label>
+                <div style={{ fontSize: '1.8rem', fontWeight: 'bold', color: 'var(--primary)' }}>
+                  {result.steps}
+                </div>
               </div>
 
               {result.steps < 5000 && (
