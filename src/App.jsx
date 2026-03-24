@@ -21,6 +21,7 @@ import ExcelJS from 'exceljs';
 import { saveAs } from 'file-saver';
 import { mockStaffMembers, ADMIN_CREDENTIALS } from './data';
 import { supabase } from './supabaseClient';
+import logo from './assets/logo.png';
 
 
 // --- Services ---
@@ -660,6 +661,13 @@ const AdminDashboard = ({ records, setRecords }) => {
 
   return (
     <div style={{ padding: '0 2rem' }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '20px', marginBottom: '2rem', padding: '1.5rem', background: 'white', borderRadius: '20px', boxShadow: '0 10px 15px -3px rgba(0, 0, 0, 0.1)' }}>
+        <img src={logo} alt="College Logo" style={{ height: '100px', width: 'auto' }} />
+        <div style={{ textAlign: 'left' }}>
+          <h1 style={{ margin: 0, color: 'var(--secondary)', fontSize: '1.8rem' }}>JKK Muniraja College of Technology</h1>
+          <p style={{ margin: 0, color: 'var(--text-muted)', fontWeight: 500 }}>Step Count Monitoring System • Admin Panel</p>
+        </div>
+      </div>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '1.5rem', marginBottom: '2rem' }}>
         <div className="glass-card" style={{ textAlign: 'center' }}>
           <h4 style={{ color: 'var(--text-muted)', marginBottom: '0.5rem' }}>Total Staff</h4>
