@@ -173,10 +173,11 @@ const exportToExcelFull = async (records, title = 'Staff Step Count Report', sta
       });
     } catch (e) { console.error("Header logo load failed", e); }
 
+    const dayName = staffMember ? new Date(records[0]?.date).toLocaleDateString('en-US', { weekday: 'long' }).toUpperCase() : new Date(title.split('-')[1]?.trim() || new Date()).toLocaleDateString('en-US', { weekday: 'long' }).toUpperCase();
     const subTitles = [
       { text: "FACULTY WELFARE CLUB", font: { name: 'Times New Roman', size: 12, bold: true } },
       { text: "FITNESS ACTIVITY ATTENDANCE - 2026", font: { name: 'Times New Roman', size: 12, bold: true } },
-      { text: `${title.toUpperCase()} NAMELIST`, font: { name: 'Times New Roman', size: 12, bold: true } }
+      { text: `${title.toUpperCase()} ${dayName ? `- ${dayName} ` : ''}STEP COUNT NAMELIST`, font: { name: 'Times New Roman', size: 12, bold: true } }
     ];
 
     subTitles.forEach((st, i) => {
@@ -197,7 +198,7 @@ const exportToExcelFull = async (records, title = 'Staff Step Count Report', sta
   worksheet.getColumn(2).width = 45;  // NAME AND DESIGNATION
   worksheet.getColumn(3).width = 15;  // STEP COUNT
   worksheet.getColumn(4).width = 20;  // TIMING
-  worksheet.getColumn(5).width = 15;  // id
+  worksheet.getColumn(5).width = 25;  // REMARKS
 
   const applyDataStyle = (row) => {
     row.eachCell((cell) => {
@@ -214,13 +215,15 @@ const exportToExcelFull = async (records, title = 'Staff Step Count Report', sta
 
   const addTableHeader = (y) => {
     const row = worksheet.getRow(y);
-    row.values = ['S.NO', 'NAME AND DESIGNATION', 'STEP COUNT', 'TIMING', 'id'];
+    row.values = ['S.NO', 'NAME AND DESIGNATION', 'STEP COUNT', 'TIMING', 'REMARKS'];
     row.eachCell(c => {
       c.font = { name: 'Times New Roman', bold: true, size: 11 };
       c.border = { top: { style: 'medium' }, left: { style: 'medium' }, bottom: { style: 'medium' }, right: { style: 'medium' } };
       c.alignment = { horizontal: 'center', vertical: 'middle' };
     });
-    row.height = 30;
+    // Vertical text for S.NO
+    row.getCell(1).alignment = { textRotation: 90, horizontal: 'center', vertical: 'middle' };
+    row.height = 45;
   };
 
   let gSNo = 1;
@@ -230,7 +233,7 @@ const exportToExcelFull = async (records, title = 'Staff Step Count Report', sta
   if (staffMember) {
     // Individual Report
     [...records].sort((a,b) => new Date(b.date) - new Date(a.date)).forEach((rec) => {
-      const row = worksheet.addRow([gSNo++, `${rec.name || staffMember.name} - ${staffMember.dept}`, rec.steps, rec.uploaded_time || rec.time || 'N/A', staffMember.id]);
+      const row = worksheet.addRow([gSNo++, `${rec.name || staffMember.name} - ${staffMember.dept}`, rec.steps, rec.uploaded_time || rec.time || 'N/A', rec.reason || '']);
       applyDataStyle(row);
     });
   } else {
@@ -256,7 +259,7 @@ const exportToExcelFull = async (records, title = 'Staff Step Count Report', sta
       
       deptStaff.forEach(staff => {
         const rec = records.find(r => r.staff_id === staff.id);
-        const row = worksheet.addRow([gSNo++, `${staff.name} - ${staff.dept}`, rec ? rec.steps : 'ABSENT', rec ? (rec.uploaded_time || rec.time) : '', staff.id]);
+        const row = worksheet.addRow([gSNo++, `${staff.name} - ${staff.dept}`, rec ? rec.steps : 'ABSENT', rec ? (rec.uploaded_time || rec.time) : '', rec ? (rec.reason || '') : '']);
         applyDataStyle(row);
         if (!rec) row.eachCell(c => c.font = { name: 'Times New Roman', color: { argb: 'FF94A3B8' } });
       });
