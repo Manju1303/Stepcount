@@ -317,6 +317,39 @@ const exportToExcelFull = async (records, title = 'Staff Step Count Report', sta
         });
       }
     }
+    // 4. Final Summary Footer
+    if (!staffMember) {
+      const totalStaff = allExpectedStaff ? allExpectedStaff.length : mockStaffMembers.length;
+      const presentCount = records.length;
+      const absentCount = Math.max(0, totalStaff - presentCount);
+
+      worksheet.addRow([]);
+      worksheet.addRow([]);
+
+      const sumHeader = worksheet.addRow(['ATTENDANCE SUMMARY (SYSTEM GENERATED)']);
+      worksheet.mergeCells(`A${sumHeader.number}:C${sumHeader.number}`);
+      sumHeader.font = { bold: true, size: 12, color: { argb: 'FF1E293B' } };
+      sumHeader.alignment = { horizontal: 'left' };
+
+      const r1 = worksheet.addRow(['TOTAL STAFF', ':', totalStaff]);
+      const r2 = worksheet.addRow(['PRESENT', ':', presentCount]);
+      const r3 = worksheet.addRow(['ABSENT', ':', absentCount]);
+      const r4 = worksheet.addRow(['PENDING', ':', 'NIL']);
+
+      [r1, r2, r3, r4].forEach(r => {
+        r.getCell(1).font = { bold: true };
+        r.getCell(3).font = { bold: true, color: { argb: 'FF3B82F6' } };
+      });
+
+      worksheet.addRow([]);
+      worksheet.addRow([]);
+      worksheet.addRow([]);
+
+      const sigRow = worksheet.addRow(['', '', '', '', '', 'PRINCIPAL SIGNATURE']);
+      sigRow.getCell(6).font = { bold: true };
+      sigRow.getCell(6).alignment = { horizontal: 'center' };
+      worksheet.addRow(['', '', '', '', '', '____________________']);
+    }
   }
 
   const buffer = await workbook.xlsx.writeBuffer();
@@ -763,7 +796,7 @@ const AdminDashboard = ({ records, setRecords }) => {
             </div>
 
             <button
-              onClick={() => exportToExcelFull(exportRecords, `Daily Report - ${selectedDate}`, null, displayStaff)}
+              onClick={() => exportToExcelFull(exportRecords, `Daily Report - ${selectedDate}`, null, mockStaffMembers)}
               className="btn-primary" style={{ padding: '0.5rem 1rem', height: '38px' }}
             >
               <FileSpreadsheet size={18} /> Export Filtered
