@@ -173,7 +173,10 @@ const exportToExcelFull = async (records, title = 'Staff Step Count Report', sta
       });
     } catch (e) { console.error("Header logo load failed", e); }
 
-    const dayName = staffMember ? new Date(records[0]?.date).toLocaleDateString('en-US', { weekday: 'long' }).toUpperCase() : new Date(title.split('-')[1]?.trim() || new Date()).toLocaleDateString('en-US', { weekday: 'long' }).toUpperCase();
+    // Extract date from title "Daily Report - YYYY-MM-DD" or similar
+    const dateMatch = title.match(/\d{4}-\d{2}-\d{2}/);
+    const reportDateStr = staffMember && records[0] ? records[0].date : (dateMatch ? dateMatch[0] : new Date().toLocaleDateString('en-CA'));
+    const dayName = new Date(reportDateStr).toLocaleDateString('en-US', { weekday: 'long' }).toUpperCase();
     const subTitles = [
       { text: "FACULTY WELFARE CLUB", font: { name: 'Times New Roman', size: 12, bold: true } },
       { text: "FITNESS ACTIVITY ATTENDANCE - 2026", font: { name: 'Times New Roman', size: 12, bold: true } },
