@@ -104,23 +104,37 @@ const processScreenshot = async (image) => {
   }
 
   let steps = 0;
-
-  // Filter out any numbers that were likely calories or miles
-  // We'll look for the largest number that isn't excluded by the units logic above
-  const nums = tokens.filter(t => /^\d+$/.test(t)).map(n => parseInt(n));
   
-  // For fitness apps, steps are usually > calories. 
-  // If we have multiple numbers, and one is significantly larger than others, it's likely steps.
-  // We also cap at 150k as a sanity check.
-  const validNums = nums.filter(n => n >= 0 && n <= 150000);
+  // Strict Number Analysis
+  const potentialSteps = [];
+  
+  for (let i = 0; i < tokens.length; i++) {
+    const t = tokens[i];
+    if (/^\d+$/.test(t)) {
+      const val = parseInt(t);
+      if (val > 150000) continue; // Out of range
 
-  if (validNums.length > 0) {
-    // Strategy: Prefer the number that is NOT 3-4 digits if a 4-5 digit one exists (Steps vs Calories)
-    const largeNums = validNums.filter(n => n > 2000);
-    if (largeNums.length > 0) {
-      steps = Math.max(...largeNums);
+      // Peek ahead to see if it's a unit we want to ignore
+      const next = tokens[i+1];
+      if (next && /^(cal|kcal|calories|mi|miles|km|kilometers|min|mins|minutes|bpm|kg|lbs)$/i.test(next)) {
+        continue; 
+      }
+      
+      potentialSteps.push(val);
+    }
+  }
+
+  if (potentialSteps.length > 0) {
+    // In most fitness apps, Steps is the largest multi-digit number
+    // but Calories can also be large. Steps are usually > 2000 if active.
+    // If we have a choice between a 1000-2000 number and a 4000-8000 number,
+    // the larger one is almost certainly steps.
+    const stepsCandidates = potentialSteps.filter(n => n > 100);
+    if (stepsCandidates.length > 0) {
+      // Pick the largest one as it's most likely the step count in this specific layout
+      steps = Math.max(...stepsCandidates);
     } else {
-      steps = Math.max(...validNums);
+      steps = Math.max(...potentialSteps);
     }
   }
 
@@ -624,7 +638,7 @@ const AdminDashboard = ({ records, setRecords }) => {
           <p style={{ margin: 0, color: 'var(--text-muted)', fontWeight: 500 }}>Step Count Monitoring System • Admin Panel</p>
         </div>
       </div>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '1.5rem', marginBottom: '2rem' }}>
+      <div className="admin-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '1.5rem', marginBottom: '2rem' }}>
         <div className="glass-card" style={{ textAlign: 'center' }}>
           <h4 style={{ color: 'var(--text-muted)', marginBottom: '0.5rem' }}>Total Staff</h4>
           <h1 className="title-gradient">{totalStaff}</h1>
@@ -640,7 +654,7 @@ const AdminDashboard = ({ records, setRecords }) => {
       </div>
 
       {filteredRecords.length > 0 && (
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: '1.5rem', marginBottom: '2rem' }}>
+        <div className="admin-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: '1.5rem', marginBottom: '2rem' }}>
           <div className="glass-card" style={{ padding: '1.5rem' }}>
             <h3 style={{ display: 'flex', alignItems: 'center', gap: '10px', color: 'var(--success)' }}>
               <Trophy size={20} /> Top Performers
@@ -726,8 +740,8 @@ const AdminDashboard = ({ records, setRecords }) => {
             </button>
           </div>
         </div>
-
-        <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+        <div className="table-wrapper">
+          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
           <thead>
             <tr style={{ borderBottom: '1px solid var(--glass-border)', textAlign: 'left', color: 'var(--text-muted)' }}>
               <th style={{ padding: '1rem' }}>Staff Name</th>
@@ -756,14 +770,11 @@ const AdminDashboard = ({ records, setRecords }) => {
                   <td>{record?.uploaded_time || record?.time || '---'}</td>
                   <td>
                     {record ? (
-                      <motion.span
-                        animate={{ opacity: [1, 0.6, 1] }}
-                        transition={{ repeat: Infinity, duration: 2 }}
-                        style={{ color: (record.steps >= 5000 || record.reason) ? '#166534' : '#991b1b', background: (record.steps >= 5000 || record.reason) ? '#dcfce7' : '#fee2e2', padding: '4px 10px', borderRadius: '12px', fontSize: '0.8rem', display: 'inline-flex', alignItems: 'center', gap: '5px' }}
-                      >
-                        <div style={{ width: 6, height: 6, borderRadius: '50%', background: (record.steps >= 5000 || record.reason) ? '#166534' : '#991b1b' }} />
-                        {(record.steps >= 5000 || record.reason) ? 'Completed' : 'Partial'}
-                      </motion.span>
+                      (record.steps >= 5000 || record.reason) ? (
+                        <div className="status-badge status-complete">Completed</div>
+                      ) : (
+                        <div className="status-badge status-incomplete">Incomplete</div>
+                      )
                     ) : (
                       <span style={{ color: 'var(--text-muted)' }}>Pending</span>
                     )}
@@ -782,7 +793,8 @@ const AdminDashboard = ({ records, setRecords }) => {
         </table>
       </div>
     </div>
-  );
+  </div>
+);
 };
 
 // --- Main App ---
