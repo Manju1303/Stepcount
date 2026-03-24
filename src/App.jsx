@@ -22,6 +22,7 @@ import { saveAs } from 'file-saver';
 import { mockStaffMembers, ADMIN_CREDENTIALS } from './data';
 import { supabase } from './supabaseClient';
 import logo from './assets/logo.png';
+import header from './assets/header.png';
 
 
 // --- Services ---
@@ -124,237 +125,140 @@ const exportToExcelFull = async (records, title = 'Staff Step Count Report', sta
   worksheet.pageSetup.orientation = 'portrait';
   worksheet.pageSetup.fitToPage = true;
   worksheet.pageSetup.fitToWidth = 1;
-
   worksheet.pageSetup.fitToHeight = 0;
-  worksheet.pageSetup.horizontalCentered = true;
-  worksheet.pageSetup.margins = {
-    left: 0.3, right: 0.3,
-    top: 0.5, bottom: 0.5,
-    header: 0.3, footer: 0.3
-  };
+  worksheet.pageSetup.margins = { left: 0.3, right: 0.3, top: 0.5, bottom: 0.5, header: 0.3, footer: 0.3 };
 
-  // Add Page Header/Footer
-  worksheet.headerFooter.oddHeader = `&C&14&B${title.toUpperCase()}`;
-  worksheet.headerFooter.oddFooter = `&L&D &T &CPage &P of &N &RAntigravity Step Monitoring`;
+  // --- Header Implementation ---
+  const addHeader = async () => {
+    worksheet.getRow(1).height = 110;
+    worksheet.mergeCells('A1:E1');
+    
+    try {
+      const headerResp = await fetch(header);
+      const headerBuf = await headerResp.arrayBuffer();
+      const headerId = workbook.addImage({ buffer: headerBuf, extension: 'png' });
+      // tl: { col: 0, row: 0 } means top-left of cell A1
+      worksheet.addImage(headerId, { 
+        tl: { col: 0, row: 0 }, 
+        ext: { width: 550, height: 110 } 
+      });
+    } catch (e) { console.error("Header logo load failed", e); }
 
-  worksheet.mergeCells('A1:G1');
-  const titleCell = worksheet.getCell('A1');
-  titleCell.value = title.toUpperCase();
-  titleCell.font = { name: 'Arial Black', size: 16, bold: true, color: { argb: 'FF1E293B' } };
-  titleCell.alignment = { horizontal: 'center', vertical: 'middle' };
-  worksheet.getRow(1).height = 35;
+    const subTitles = [
+      { text: "FACULTY WELFARE CLUB", font: { name: 'Times New Roman', size: 12, bold: true } },
+      { text: "FITNESS ACTIVITY ATTENDANCE - 2026", font: { name: 'Times New Roman', size: 12, bold: true } },
+      { text: `${title.toUpperCase()} NAMELIST`, font: { name: 'Times New Roman', size: 12, bold: true } }
+    ];
 
-  // Set compressed column widths for A4 portrait
-  worksheet.getColumn(1).width = 6;  // S.No
-  worksheet.getColumn(2).width = 12; // Date
-  worksheet.getColumn(3).width = 10; // Steps
-  worksheet.getColumn(4).width = 25; // Name
-  worksheet.getColumn(5).width = 20; // Department
-  worksheet.getColumn(6).width = 15; // Uploaded Time
-  worksheet.getColumn(7).width = 25; // Reason
-
-
-
-  if (staffMember) {
-    worksheet.mergeCells('A2:G2');
-    const subTitle = worksheet.getCell('A2');
-    subTitle.value = `MONTHLY PERFORMANCE REPORT: ${staffMember.name} (ID: ${staffMember.id}) | DEPARTMENT: ${staffMember.dept}`;
-    subTitle.font = { name: 'Arial', size: 12, bold: true, color: { argb: 'FF475569' } };
-    subTitle.alignment = { horizontal: 'center' };
-    worksheet.getRow(2).height = 25;
-  }
-
-  // Helper to get clean department name
-  const getDept = (r) => {
-    let d = r.department || r.dept || mockStaffMembers.find(s => s.id === r.staff_id)?.dept || 'N/A';
-    if (d.toUpperCase().includes('AI&DS') || d.toUpperCase().includes('AIDS')) return 'AI&DS';
-    if (d.toUpperCase().includes('CSE')) return 'CSE';
-    return d.includes('/') ? d.split('/')[1].trim() : d.trim();
-  };
-
-  const addTableHeader = (y) => {
-    const headerRow = worksheet.getRow(y);
-    headerRow.values = ['S.No', 'Date', 'Steps', 'Name', 'Department', 'Uploaded Time', 'Reason'];
-    headerRow.eachCell((cell) => {
-      cell.font = { bold: true, color: { argb: 'FFFFFFFF' } };
-      cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1E293B' } };
-      cell.border = { top: { style: 'thin' }, left: { style: 'thin' }, bottom: { style: 'thin' }, right: { style: 'thin' } };
-      cell.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
+    subTitles.forEach((st, i) => {
+      const rowNum = i + 2; // Offset by header image row
+      worksheet.mergeCells(`A${rowNum}:E${rowNum}`);
+      const cell = worksheet.getCell(`A${rowNum}`);
+      cell.value = st.text;
+      cell.font = st.font;
+      cell.alignment = { horizontal: 'center' };
+      worksheet.getRow(rowNum).height = 20;
     });
-    headerRow.height = 25;
-    return headerRow;
   };
+
+  await addHeader();
+
+  // Column Config
+  worksheet.getColumn(1).width = 6;   // S.NO
+  worksheet.getColumn(2).width = 45;  // NAME AND DESIGNATION
+  worksheet.getColumn(3).width = 15;  // STEP COUNT
+  worksheet.getColumn(4).width = 20;  // TIMING
+  worksheet.getColumn(5).width = 15;  // id
 
   const applyDataStyle = (row) => {
     row.eachCell((cell) => {
+      cell.font = { name: 'Times New Roman', size: 11 };
       cell.border = { top: { style: 'thin' }, left: { style: 'thin' }, bottom: { style: 'thin' }, right: { style: 'thin' } };
-      cell.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
+      cell.alignment = { horizontal: 'left', vertical: 'middle', indent: 1 };
     });
+    row.getCell(1).alignment = { horizontal: 'center' };
+    row.getCell(3).alignment = { horizontal: 'center' };
+    row.getCell(4).alignment = { horizontal: 'center' };
+    row.getCell(5).alignment = { horizontal: 'center' };
+    row.height = 25;
+  };
+
+  const addTableHeader = (y) => {
+    const row = worksheet.getRow(y);
+    row.values = ['S.NO', 'NAME AND DESIGNATION', 'STEP COUNT', 'TIMING', 'id'];
+    row.eachCell(c => {
+      c.font = { name: 'Times New Roman', bold: true, size: 11 };
+      c.border = { top: { style: 'medium' }, left: { style: 'medium' }, bottom: { style: 'medium' }, right: { style: 'medium' } };
+      c.alignment = { horizontal: 'center', vertical: 'middle' };
+    });
+    row.height = 30;
   };
 
   let gSNo = 1;
+  let curY = 6; // Start table at row 6
+  addTableHeader(curY++);
 
-  // CASE 1: INDIVIDUAL STAFF REPORT
   if (staffMember) {
-    addTableHeader(4);
-    const sorted = [...records].sort((a, b) => new Date(b.date) - new Date(a.date));
-    sorted.forEach((rec, idx) => {
-      const row = worksheet.addRow([
-        idx + 1,
-        rec.date,
-        rec.steps,
-        rec.name || staffMember.name,
-        getDept(rec),
-        rec.uploaded_time || rec.time || 'N/A',
-        rec.reason || '---'
-      ]);
+    // Individual Report
+    [...records].sort((a,b) => new Date(b.date) - new Date(a.date)).forEach((rec) => {
+      const row = worksheet.addRow([gSNo++, `${rec.name || staffMember.name} - ${staffMember.dept}`, rec.steps, rec.uploaded_time || rec.time || 'N/A', staffMember.id]);
       applyDataStyle(row);
-      if (rec.steps < 5000) row.getCell(3).font = { bold: true, color: { argb: 'FFEF4444' } };
     });
-  }
-  // CASE 2: ADMIN REPORT (TABLE PER DEPARTMENT)
-  else {
-    const completed = records.filter(r => r.steps >= 5000);
-    const incomplete = records.filter(r => r.steps < 5000);
+  } else {
+    // Admin Report: Grouped by Department
+    const principal = mockStaffMembers.find(s => s.id === 'principal');
+    if (principal) {
+      const rec = records.find(r => r.staff_id === 'principal');
+      const row = worksheet.addRow([gSNo++, `${principal.name} - *Principal sir*`, rec ? rec.steps : 'ABSENT', rec ? (rec.uploaded_time || rec.time) : '', '']);
+      applyDataStyle(row);
+    }
 
-    // 1. Tables for Each Department
-    const depts = [...new Set(completed.map(getDept))].sort();
-
+    const depts = ['CSE', 'IT', 'MCA', 'AI&DS', 'Cyber Security', 'Automobile', 'Civil', 'ECE', 'EEE', 'Mech', 'S&H', 'COE', 'Exam Cell', 'Library', 'Placement', 'Admission', 'Office', 'MBA', 'Yoga', 'PD', 'FM Radio'];
+    
     depts.forEach(deptName => {
-      worksheet.addRow([]); // Spacer
-      worksheet.addRow([]); // Spacer
+      const deptStaff = mockStaffMembers.filter(s => s.dept.includes(deptName) && s.id !== 'principal');
+      if (deptStaff.length === 0) return;
 
-      const deptBanner = worksheet.addRow([`TABLE: STAFF REPORT - DEPARTMENT OF ${deptName}`]);
-      worksheet.mergeCells(`A${deptBanner.number}:G${deptBanner.number}`);
-      deptBanner.font = { bold: true, size: 14, color: { argb: 'FFFFFFFF' } };
-      deptBanner.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF3B82F6' } };
-      deptBanner.alignment = { horizontal: 'center' };
-      deptBanner.height = 30;
-
-      addTableHeader(worksheet.lastRow.number + 1);
-
-      const deptRecords = completed.filter(r => getDept(r) === deptName).sort((a, b) => (a.name || '').localeCompare(b.name || ''));
-      deptRecords.forEach(rec => {
-        const staffMap = mockStaffMembers.find(s => s.id === rec.staff_id) || {};
-        const row = worksheet.addRow([
-          gSNo++,
-          rec.date,
-          rec.steps,
-          rec.name || staffMap.name || 'N/A',
-          deptName,
-          rec.uploaded_time || rec.time || 'N/A',
-          rec.reason || '---'
-        ]);
+      const banner = worksheet.addRow([`*Department of ${deptName}*`]);
+      worksheet.mergeCells(`A${banner.number}:E${banner.number}`);
+      banner.font = { name: 'Times New Roman', bold: true, italic: true, size: 12 };
+      banner.alignment = { horizontal: 'center' };
+      banner.height = 28;
+      
+      deptStaff.forEach(staff => {
+        const rec = records.find(r => r.staff_id === staff.id);
+        const row = worksheet.addRow([gSNo++, `${staff.name} - ${staff.dept}`, rec ? rec.steps : 'ABSENT', rec ? (rec.uploaded_time || rec.time) : '', staff.id]);
         applyDataStyle(row);
+        if (!rec) row.eachCell(c => c.font = { name: 'Times New Roman', color: { argb: 'FF94A3B8' } });
       });
     });
 
-    // 2. Incomplete Table at the End
-    if (incomplete.length > 0) {
-      worksheet.addRow([]);
-      worksheet.addRow([]);
-      worksheet.addRow([]);
+    // Summary at the Bottom
+    const total = allExpectedStaff ? allExpectedStaff.length : mockStaffMembers.length;
+    const present = records.length;
+    const absent = Math.max(0, total - present);
 
-      const incBanner = worksheet.addRow(['TABLE: INCOMPLETE SUBMISSIONS (BELOW 5000 STEPS)']);
-      worksheet.mergeCells(`A${incBanner.number}:G${incBanner.number}`);
-      incBanner.font = { bold: true, size: 14, color: { argb: 'FFFFFFFF' } };
-      incBanner.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFEF4444' } }; // Red for incomplete
-      incBanner.alignment = { horizontal: 'center' };
-      incBanner.height = 30;
+    worksheet.addRow([]);
+    const summaryHeader = worksheet.addRow(['ATTENDANCE SUMMARY']);
+    worksheet.mergeCells(`A${summaryHeader.number}:B${summaryHeader.number}`);
+    summaryHeader.font = { name: 'Times New Roman', bold: true, underline: true, size: 12 };
 
-      addTableHeader(worksheet.lastRow.number + 1);
+    worksheet.addRow(['TOTAL STAFF', ':', total]).font = { name: 'Times New Roman', bold: true };
+    worksheet.addRow(['PRESENT', ':', present]).font = { name: 'Times New Roman', bold: true };
+    worksheet.addRow(['ABSENT', ':', absent]).font = { name: 'Times New Roman', bold: true };
+    worksheet.addRow(['PENDING', ':', 'NIL']).font = { name: 'Times New Roman', bold: true };
 
-      incomplete.forEach(rec => {
-        const staffMap = mockStaffMembers.find(s => s.id === rec.staff_id) || {};
-        const row = worksheet.addRow([
-          gSNo++,
-          rec.date,
-          rec.steps,
-          rec.name || staffMap.name || 'N/A',
-          getDept(rec),
-          rec.uploaded_time || rec.time || 'N/A',
-          rec.reason || '---'
-        ]);
-        applyDataStyle(row);
-        row.getCell(3).font = { bold: true, color: { argb: 'FFEF4444' } };
-        row.getCell(7).font = { bold: true, color: { argb: 'FFEF4444' } };
-      });
-    }
-
-    // 3. Pending Table
-    if (allExpectedStaff) {
-      const pendingStaff = allExpectedStaff.filter(s => !records.some(r => r.staff_id === s.id));
-      if (pendingStaff.length > 0) {
-        worksheet.addRow([]);
-        worksheet.addRow([]);
-
-        const penBanner = worksheet.addRow(['TABLE: PENDING SUBMISSIONS (NOT YET UPLOADED)']);
-        worksheet.mergeCells(`A${penBanner.number}:G${penBanner.number}`);
-        penBanner.font = { bold: true, size: 14, color: { argb: 'FFFFFFFF' } };
-        penBanner.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF64748B' } }; // Gray for pending
-        penBanner.alignment = { horizontal: 'center' };
-        penBanner.height = 30;
-
-        const pHead = worksheet.addRow(['S.No', 'Date', 'Steps', 'Name', 'Department', 'Status', 'Notes']);
-        pHead.eachCell(c => {
-          c.font = { bold: true, color: { argb: 'FFFFFFFF' } };
-          c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF334155' } };
-          c.border = { top: { style: 'thin' }, left: { style: 'thin' }, bottom: { style: 'thin' }, right: { style: 'thin' } };
-          c.alignment = { horizontal: 'center' };
-        });
-
-        pendingStaff.forEach((staff) => {
-          const row = worksheet.addRow([
-            gSNo++,
-            records.length > 0 ? records[0].date : new Date().toLocaleDateString('en-CA'),
-            '---',
-            staff.name,
-            staff.dept,
-            'PENDING',
-            'No report discovered for this date'
-          ]);
-          applyDataStyle(row);
-        });
-      }
-    }
-    // 4. Final Summary Footer
-    if (!staffMember) {
-      const totalStaff = allExpectedStaff ? allExpectedStaff.length : mockStaffMembers.length;
-      const presentCount = records.length;
-      const absentCount = Math.max(0, totalStaff - presentCount);
-
-      worksheet.addRow([]);
-      worksheet.addRow([]);
-
-      const sumHeader = worksheet.addRow(['ATTENDANCE SUMMARY (SYSTEM GENERATED)']);
-      worksheet.mergeCells(`A${sumHeader.number}:C${sumHeader.number}`);
-      sumHeader.font = { bold: true, size: 12, color: { argb: 'FF1E293B' } };
-      sumHeader.alignment = { horizontal: 'left' };
-
-      const r1 = worksheet.addRow(['TOTAL STAFF', ':', totalStaff]);
-      const r2 = worksheet.addRow(['PRESENT', ':', presentCount]);
-      const r3 = worksheet.addRow(['ABSENT', ':', absentCount]);
-      const r4 = worksheet.addRow(['PENDING', ':', 'NIL']);
-
-      [r1, r2, r3, r4].forEach(r => {
-        r.getCell(1).font = { bold: true };
-        r.getCell(3).font = { bold: true, color: { argb: 'FF3B82F6' } };
-      });
-
-      worksheet.addRow([]);
-      worksheet.addRow([]);
-      worksheet.addRow([]);
-
-      const sigRow = worksheet.addRow(['', '', '', '', '', 'PRINCIPAL SIGNATURE']);
-      sigRow.getCell(6).font = { bold: true };
-      sigRow.getCell(6).alignment = { horizontal: 'center' };
-      worksheet.addRow(['', '', '', '', '', '____________________']);
-    }
+    worksheet.addRow([]);
+    worksheet.addRow([]);
+    const sig = worksheet.addRow(['', '', '', '', 'PRINCIPAL SIGNATURE']);
+    sig.getCell(5).font = { name: 'Times New Roman', bold: true };
+    worksheet.addRow(['', '', '', '', '____________________']);
   }
 
   const buffer = await workbook.xlsx.writeBuffer();
   saveAs(new Blob([buffer]), `${title.replace(/\s+/g, '_')}.xlsx`);
 };
+
 
 // --- Components ---
 
