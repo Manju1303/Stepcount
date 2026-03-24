@@ -1,13 +1,13 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { 
-  LogIn, 
-  Upload, 
-  BarChart3, 
-  LogOut, 
-  CheckCircle2, 
-  Calendar, 
-  User, 
+import {
+  LogIn,
+  Upload,
+  BarChart3,
+  LogOut,
+  CheckCircle2,
+  Calendar,
+  User,
   FileSpreadsheet,
   Zap,
   Loader2,
@@ -31,23 +31,23 @@ const preprocessImage = (imageSrc) => {
     img.onload = () => {
       const canvas = document.createElement('canvas');
       const ctx = canvas.getContext('2d');
-      
+
       const isPortrait = img.height > img.width * 1.5;
-      
+
       const cropX = isPortrait ? img.width * 0.2 : 0;
       const cropY = isPortrait ? img.height * 0.15 : 0;
       const cropWidth = isPortrait ? img.width * 0.6 : img.width;
-      const cropHeight = isPortrait ? img.height * 0.20 : img.height; 
-      
+      const cropHeight = isPortrait ? img.height * 0.20 : img.height;
+
       canvas.width = cropWidth * 2.5;
       canvas.height = cropHeight * 2.5;
-      
+
       ctx.drawImage(
-        img, 
+        img,
         cropX, cropY, cropWidth, cropHeight,
         0, 0, canvas.width, canvas.height
       );
-      
+
       const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
       const data = imgData.data;
       for (let i = 0; i < data.length; i += 4) {
@@ -66,47 +66,47 @@ const processScreenshot = async (image) => {
   const processedImage = await preprocessImage(image);
   const result = await Tesseract.recognize(processedImage, 'eng');
   let text = result.data.text.toLowerCase();
-  
-  text = text.replace(/,/g, ''); 
-  
+
+  text = text.replace(/,/g, '');
+
   const rawTokens = text.split(/\s+/).filter(t => t.trim() !== '');
-  
+
   let tokens = [];
   for (let i = 0; i < rawTokens.length; i++) {
     const t = rawTokens[i];
-    
-    if (t === 'move' && (rawTokens[i+1] === 'min' || rawTokens[i+1] === 'mins')) {
+
+    if (t === 'move' && (rawTokens[i + 1] === 'min' || rawTokens[i + 1] === 'mins')) {
       if (tokens.length > 0 && /^\d+(\.\d+)?$/.test(tokens[tokens.length - 1])) tokens.pop();
       i++;
       continue;
     }
-    
+
     if (/^(cal|kcal|calories|mi|miles|km|kilometers|min|mins|minutes|bpm|kg|lbs)$/i.test(t)) {
-      if (tokens.length > 0 && /^\d+(\.\d+)?$/.test(tokens[tokens.length - 1])) tokens.pop(); 
-      continue; 
+      if (tokens.length > 0 && /^\d+(\.\d+)?$/.test(tokens[tokens.length - 1])) tokens.pop();
+      continue;
     }
-    
+
     if (/^(2023|2024|2025|2026)$/.test(t)) {
       continue;
     }
 
     if (tokens.length > 0 && /^\d{1,2}$/.test(tokens[tokens.length - 1]) && /^\d{3}$/.test(t)) {
-       tokens[tokens.length - 1] = tokens[tokens.length - 1] + t;
-       continue;
+      tokens[tokens.length - 1] = tokens[tokens.length - 1] + t;
+      continue;
     }
-    
+
     tokens.push(t);
   }
-  
+
   let steps = 0;
 
   const nums = tokens.filter(t => /^\d+$/.test(t)).map(n => parseInt(n));
   const validNums = nums.filter(n => n <= 150000);
-  
+
   if (validNums.length > 0) {
-     steps = Math.max(...validNums);
+    steps = Math.max(...validNums);
   }
-  
+
   const now = new Date();
   const date = now.toLocaleDateString('en-CA');
   const time = now.toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit' });
@@ -123,6 +123,7 @@ const exportToExcelFull = async (records, title = 'Staff Step Count Report', sta
   worksheet.pageSetup.orientation = 'portrait';
   worksheet.pageSetup.fitToPage = true;
   worksheet.pageSetup.fitToWidth = 1;
+
   worksheet.pageSetup.fitToHeight = 0;
   worksheet.pageSetup.horizontalCentered = true;
   worksheet.pageSetup.margins = {
@@ -209,7 +210,7 @@ const exportToExcelFull = async (records, title = 'Staff Step Count Report', sta
       applyDataStyle(row);
       if (rec.steps < 5000) row.getCell(3).font = { bold: true, color: { argb: 'FFEF4444' } };
     });
-  } 
+  }
   // CASE 2: ADMIN REPORT (TABLE PER DEPARTMENT)
   else {
     const completed = records.filter(r => r.steps >= 5000);
@@ -217,11 +218,11 @@ const exportToExcelFull = async (records, title = 'Staff Step Count Report', sta
 
     // 1. Tables for Each Department
     const depts = [...new Set(completed.map(getDept))].sort();
-    
+
     depts.forEach(deptName => {
       worksheet.addRow([]); // Spacer
       worksheet.addRow([]); // Spacer
-      
+
       const deptBanner = worksheet.addRow([`TABLE: STAFF REPORT - DEPARTMENT OF ${deptName}`]);
       worksheet.mergeCells(`A${deptBanner.number}:G${deptBanner.number}`);
       deptBanner.font = { bold: true, size: 14, color: { argb: 'FFFFFFFF' } };
@@ -231,7 +232,7 @@ const exportToExcelFull = async (records, title = 'Staff Step Count Report', sta
 
       addTableHeader(worksheet.lastRow.number + 1);
 
-      const deptRecords = completed.filter(r => getDept(r) === deptName).sort((a,b) => (a.name||'').localeCompare(b.name||''));
+      const deptRecords = completed.filter(r => getDept(r) === deptName).sort((a, b) => (a.name || '').localeCompare(b.name || ''));
       deptRecords.forEach(rec => {
         const staffMap = mockStaffMembers.find(s => s.id === rec.staff_id) || {};
         const row = worksheet.addRow([
@@ -252,7 +253,7 @@ const exportToExcelFull = async (records, title = 'Staff Step Count Report', sta
       worksheet.addRow([]);
       worksheet.addRow([]);
       worksheet.addRow([]);
-      
+
       const incBanner = worksheet.addRow(['TABLE: INCOMPLETE SUBMISSIONS (BELOW 5000 STEPS)']);
       worksheet.mergeCells(`A${incBanner.number}:G${incBanner.number}`);
       incBanner.font = { bold: true, size: 14, color: { argb: 'FFFFFFFF' } };
@@ -285,7 +286,7 @@ const exportToExcelFull = async (records, title = 'Staff Step Count Report', sta
       if (pendingStaff.length > 0) {
         worksheet.addRow([]);
         worksheet.addRow([]);
-        
+
         const penBanner = worksheet.addRow(['TABLE: PENDING SUBMISSIONS (NOT YET UPLOADED)']);
         worksheet.mergeCells(`A${penBanner.number}:G${penBanner.number}`);
         penBanner.font = { bold: true, size: 14, color: { argb: 'FFFFFFFF' } };
@@ -297,7 +298,7 @@ const exportToExcelFull = async (records, title = 'Staff Step Count Report', sta
         pHead.eachCell(c => {
           c.font = { bold: true, color: { argb: 'FFFFFFFF' } };
           c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF334155' } };
-          c.border = { top: {style:'thin'}, left: {style:'thin'}, bottom: {style:'thin'}, right: {style:'thin'} };
+          c.border = { top: { style: 'thin' }, left: { style: 'thin' }, bottom: { style: 'thin' }, right: { style: 'thin' } };
           c.alignment = { horizontal: 'center' };
         });
 
@@ -412,7 +413,7 @@ const StaffDashboard = ({ user, records, setRecords }) => {
       alert("Please provide a valid reason since your step count is below 5000.");
       return;
     }
-    
+
     setLoading(true);
     try {
       const newRecord = {
@@ -426,14 +427,14 @@ const StaffDashboard = ({ user, records, setRecords }) => {
         uploaded_time: result.uploadedTime,
         reason: (stepsNum < 5000 && !reason.trim()) ? 'Steps below daily target (< 5000)' : reason,
       };
-      
+
       const { data, error } = await supabase
         .from('step_records')
         .insert([newRecord])
         .select();
 
       if (error) throw error;
-      
+
       if (data) {
         setRecords(prev => [...prev, data[0]]);
         setFile(null);
@@ -480,7 +481,7 @@ const StaffDashboard = ({ user, records, setRecords }) => {
             <h2>{user.name}</h2>
             <p style={{ color: 'var(--text-muted)' }}>{user.dept}</p>
           </div>
-          
+
           {hasUploadedToday ? (
             <div style={{ textAlign: 'center', padding: '2rem', background: '#f0fdf4', borderRadius: '16px', border: '1px solid #dcfce7' }}>
               <CheckCircle2 size={40} color="var(--success)" style={{ margin: '0 auto 1rem' }} />
@@ -528,13 +529,13 @@ const StaffDashboard = ({ user, records, setRecords }) => {
               {result.steps < 5000 && (
                 <div style={{ marginBottom: '1rem' }}>
                   <label style={{ display: 'block', marginBottom: '0.5rem', fontSize: '0.9rem', color: 'var(--accent)' }}>Steps are below 5000. Please provide a reason:</label>
-                  <input 
-                    type="text" 
-                    value={reason} 
-                    onChange={(e) => setReason(e.target.value)} 
-                    placeholder="Enter reason here..." 
-                    className="input-field" 
-                    style={{ border: '1px solid #fecaca' }} 
+                  <input
+                    type="text"
+                    value={reason}
+                    onChange={(e) => setReason(e.target.value)}
+                    placeholder="Enter reason here..."
+                    className="input-field"
+                    style={{ border: '1px solid #fecaca' }}
                   />
                 </div>
               )}
@@ -559,9 +560,9 @@ const StaffDashboard = ({ user, records, setRecords }) => {
               <Calendar size={22} color="var(--primary)" /> Recent Activity
             </h3>
             <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
-              <input 
-                type="month" 
-                value={selectedMonth} 
+              <input
+                type="month"
+                value={selectedMonth}
                 onChange={(e) => setSelectedMonth(e.target.value)}
                 onClick={(e) => e.target.showPicker()}
                 className="input-field"
@@ -601,8 +602,8 @@ const StaffDashboard = ({ user, records, setRecords }) => {
 const AdminDashboard = ({ records, setRecords }) => {
   const [selectedDate, setSelectedDate] = useState(new Date().toLocaleDateString('en-CA'));
   const [filterDept, setFilterDept] = useState('All');
-  const [sortOrder, setSortOrder] = useState('time'); 
-  
+  const [sortOrder, setSortOrder] = useState('time');
+
   const filteredRecords = records.filter(r => r.date === selectedDate);
   const totalStaff = mockStaffMembers.length;
   const completedToday = new Set(filteredRecords.filter(r => r.steps >= 5000 || r.reason).map(r => r.staff_id)).size;
@@ -619,9 +620,9 @@ const AdminDashboard = ({ records, setRecords }) => {
 
     if (sortOrder === 'steps-high') return stepsB - stepsA;
     if (sortOrder === 'steps-low') {
-        const sa = recA ? recA.steps : 999999;
-        const sb = recB ? recB.steps : 999999;
-        return sa - sb;
+      const sa = recA ? recA.steps : 999999;
+      const sb = recB ? recB.steps : 999999;
+      return sa - sb;
     }
     const timeA = recA ? recA.id : 0;
     const timeB = recB ? recB.id : 0;
@@ -643,7 +644,7 @@ const AdminDashboard = ({ records, setRecords }) => {
 
   const handleDelete = async (id) => {
     if (!confirm("Are you sure you want to delete this record from Cloud?")) return;
-    
+
     try {
       const { error } = await supabase
         .from('step_records')
@@ -698,7 +699,7 @@ const AdminDashboard = ({ records, setRecords }) => {
               })}
             </div>
           </div>
-          
+
           <div className="glass-card" style={{ padding: '1.5rem' }}>
             <h3 style={{ display: 'flex', alignItems: 'center', gap: '10px', color: 'var(--accent)' }}>
               <TrendingDown size={20} /> Needs Attention
@@ -736,14 +737,14 @@ const AdminDashboard = ({ records, setRecords }) => {
               <label style={{ display: 'block', fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: '0.2rem' }}>Date</label>
               <input type="date" value={selectedDate} onChange={(e) => setSelectedDate(e.target.value)} onClick={(e) => e.target.showPicker()} className="input-field" style={{ marginBottom: 0, width: 'auto', padding: '0.4rem', cursor: 'pointer' }} />
             </div>
-            
+
             <div>
               <label style={{ display: 'block', fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: '0.2rem' }}>Department</label>
               <select value={filterDept} onChange={(e) => setFilterDept(e.target.value)} className="input-field" style={{ marginBottom: 0, width: 'auto', padding: '0.4rem' }}>
                 {departments.map(d => <option key={d} value={d}>{d}</option>)}
               </select>
             </div>
-            
+
             <div>
               <label style={{ display: 'block', fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: '0.2rem' }}>Sort</label>
               <select value={sortOrder} onChange={(e) => setSortOrder(e.target.value)} className="input-field" style={{ marginBottom: 0, width: 'auto', padding: '0.4rem' }}>
@@ -753,8 +754,8 @@ const AdminDashboard = ({ records, setRecords }) => {
               </select>
             </div>
 
-            <button 
-              onClick={() => exportToExcelFull(exportRecords, `Daily Report - ${selectedDate}`, null, displayStaff)} 
+            <button
+              onClick={() => exportToExcelFull(exportRecords, `Daily Report - ${selectedDate}`, null, displayStaff)}
               className="btn-primary" style={{ padding: '0.5rem 1rem', height: '38px' }}
             >
               <FileSpreadsheet size={18} /> Export Filtered
@@ -791,8 +792,8 @@ const AdminDashboard = ({ records, setRecords }) => {
                   <td>{record?.uploaded_time || record?.time || '---'}</td>
                   <td>
                     {record ? (
-                      <motion.span 
-                        animate={{ opacity: [1, 0.6, 1] }} 
+                      <motion.span
+                        animate={{ opacity: [1, 0.6, 1] }}
                         transition={{ repeat: Infinity, duration: 2 }}
                         style={{ color: (record.steps >= 5000 || record.reason) ? '#166534' : '#991b1b', background: (record.steps >= 5000 || record.reason) ? '#dcfce7' : '#fee2e2', padding: '4px 10px', borderRadius: '12px', fontSize: '0.8rem', display: 'inline-flex', alignItems: 'center', gap: '5px' }}
                       >
@@ -839,7 +840,7 @@ function App() {
       }
     };
     fetchCloudRecords();
-    
+
     const savedUser = localStorage.getItem('step_user');
     if (savedUser) setUser(JSON.parse(savedUser));
   }, []);
@@ -857,7 +858,7 @@ function App() {
   return (
     <div className="app-container">
       <Navbar user={user} onLogout={handleLogout} />
-      
+
       <main style={{ padding: '2rem 0' }}>
         <AnimatePresence mode="wait">
           {!user ? (
