@@ -92,6 +92,9 @@ const processScreenshot = async (image) => {
       continue;
     }
 
+    // New: If the token is just a single dot or comma, skip
+    if (t === '.' || t === ',') continue;
+
     if (tokens.length > 0 && /^\d{1,2}$/.test(tokens[tokens.length - 1]) && /^\d{3}$/.test(t)) {
       tokens[tokens.length - 1] = tokens[tokens.length - 1] + t;
       continue;
@@ -102,11 +105,23 @@ const processScreenshot = async (image) => {
 
   let steps = 0;
 
+  // Filter out any numbers that were likely calories or miles
+  // We'll look for the largest number that isn't excluded by the units logic above
   const nums = tokens.filter(t => /^\d+$/.test(t)).map(n => parseInt(n));
-  const validNums = nums.filter(n => n <= 150000);
+  
+  // For fitness apps, steps are usually > calories. 
+  // If we have multiple numbers, and one is significantly larger than others, it's likely steps.
+  // We also cap at 150k as a sanity check.
+  const validNums = nums.filter(n => n >= 0 && n <= 150000);
 
   if (validNums.length > 0) {
-    steps = Math.max(...validNums);
+    // Strategy: Prefer the number that is NOT 3-4 digits if a 4-5 digit one exists (Steps vs Calories)
+    const largeNums = validNums.filter(n => n > 2000);
+    if (largeNums.length > 0) {
+      steps = Math.max(...largeNums);
+    } else {
+      steps = Math.max(...validNums);
+    }
   }
 
   const now = new Date();
@@ -458,10 +473,14 @@ const StaffDashboard = ({ user, records, setRecords }) => {
               </div>
 
               <div style={{ marginBottom: '1rem' }}>
-                <label style={{ display: 'block', marginBottom: '0.5rem', fontSize: '0.9rem', color: 'var(--text-muted)' }}>Extracted Steps Count:</label>
-                <div style={{ fontSize: '1.8rem', fontWeight: 'bold', color: 'var(--primary)' }}>
-                  {result.steps}
-                </div>
+                <label style={{ display: 'block', marginBottom: '0.5rem', fontSize: '0.9rem', color: 'var(--text-muted)' }}>Validate/Correct Steps Count:</label>
+                <input 
+                  type="number"
+                  value={result.steps}
+                  onChange={(e) => setResult({...result, steps: parseInt(e.target.value) || 0})}
+                  className="input-field"
+                  style={{ fontSize: '1.8rem', fontWeight: 'bold', color: 'var(--primary)', textAlign: 'center' }}
+                />
               </div>
 
               {result.steps < 5000 && (
