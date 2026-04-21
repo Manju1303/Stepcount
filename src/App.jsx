@@ -21,6 +21,7 @@ import ExcelJS from 'exceljs';
 import { saveAs } from 'file-saver';
 import { mockStaffMembers, ADMIN_CREDENTIALS } from './data';
 import { supabase } from './supabaseClient';
+import { cleanText, tokenize, extractSteps } from './extractionLogic';
 import logo from './assets/logo.png';
 import header from './assets/header.png';
 
@@ -34,15 +35,18 @@ const preprocessImage = (imageSrc) => {
       const canvas = document.createElement('canvas');
       const ctx = canvas.getContext('2d');
 
-      const isPortrait = img.height > img.width * 1.5;
+      const ratio = img.height / img.width;
+      const isFullPortrait = ratio > 1.7; // Standard phone screen ratio
 
-      const cropX = isPortrait ? img.width * 0.2 : 0;
-      const cropY = isPortrait ? img.height * 0.15 : 0;
-      const cropWidth = isPortrait ? img.width * 0.6 : img.width;
-      const cropHeight = isPortrait ? img.height * 0.20 : img.height;
+      // Only crop if it's a full-length portrait screenshot
+      // Otherwise (smartwatch, square, or pre-cropped), use the whole image
+      const cropX = isFullPortrait ? img.width * 0.05 : 0;
+      const cropY = isFullPortrait ? img.height * 0.10 : 0;
+      const cropWidth = isFullPortrait ? img.width * 0.90 : img.width;
+      const cropHeight = isFullPortrait ? img.height * 0.50 : img.height; // Wider area (50% of screen)
 
-      canvas.width = cropWidth * 2.5;
-      canvas.height = cropHeight * 2.5;
+      canvas.width = cropWidth * 2;
+      canvas.height = cropHeight * 2;
 
       ctx.drawImage(
         img,
@@ -67,76 +71,11 @@ const preprocessImage = (imageSrc) => {
 const processScreenshot = async (image) => {
   const processedImage = await preprocessImage(image);
   const result = await Tesseract.recognize(processedImage, 'eng');
-  let text = result.data.text.toLowerCase();
+  const text = result.data.text;
 
-  text = text.replace(/,/g, '');
-
-  const rawTokens = text.split(/\s+/).filter(t => t.trim() !== '');
-
-  let tokens = [];
-  for (let i = 0; i < rawTokens.length; i++) {
-    const t = rawTokens[i];
-
-    if (t === 'move' && (rawTokens[i + 1] === 'min' || rawTokens[i + 1] === 'mins')) {
-      if (tokens.length > 0 && /^\d+(\.\d+)?$/.test(tokens[tokens.length - 1])) tokens.pop();
-      i++;
-      continue;
-    }
-
-    if (/^(cal|kcal|calories|mi|miles|km|kilometers|min|mins|minutes|bpm|kg|lbs)$/i.test(t)) {
-      if (tokens.length > 0 && /^\d+(\.\d+)?$/.test(tokens[tokens.length - 1])) tokens.pop();
-      continue;
-    }
-
-    if (/^(2023|2024|2025|2026)$/.test(t)) {
-      continue;
-    }
-
-    // New: If the token is just a single dot or comma, skip
-    if (t === '.' || t === ',') continue;
-
-    if (tokens.length > 0 && /^\d{1,2}$/.test(tokens[tokens.length - 1]) && /^\d{3}$/.test(t)) {
-      tokens[tokens.length - 1] = tokens[tokens.length - 1] + t;
-      continue;
-    }
-
-    tokens.push(t);
-  }
-
-  let steps = 0;
-  
-  // Strict Number Analysis
-  const potentialSteps = [];
-  
-  for (let i = 0; i < tokens.length; i++) {
-    const t = tokens[i];
-    if (/^\d+$/.test(t)) {
-      const val = parseInt(t);
-      if (val > 150000) continue; // Out of range
-
-      // Peek ahead to see if it's a unit we want to ignore
-      const next = tokens[i+1];
-      if (next && /^(cal|kcal|calories|mi|miles|km|kilometers|min|mins|minutes|bpm|kg|lbs)$/i.test(next)) {
-        continue; 
-      }
-      
-      potentialSteps.push(val);
-    }
-  }
-
-  if (potentialSteps.length > 0) {
-    // In most fitness apps, Steps is the largest multi-digit number
-    // but Calories can also be large. Steps are usually > 2000 if active.
-    // If we have a choice between a 1000-2000 number and a 4000-8000 number,
-    // the larger one is almost certainly steps.
-    const stepsCandidates = potentialSteps.filter(n => n > 100);
-    if (stepsCandidates.length > 0) {
-      // Pick the largest one as it's most likely the step count in this specific layout
-      steps = Math.max(...stepsCandidates);
-    } else {
-      steps = Math.max(...potentialSteps);
-    }
-  }
+  const cleaned = cleanText(text);
+  const tokens = tokenize(cleaned);
+  const steps = extractSteps(tokens);
 
   const now = new Date();
   const date = now.toLocaleDateString('en-CA');
