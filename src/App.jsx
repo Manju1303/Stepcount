@@ -296,13 +296,36 @@ const Login = ({ onLogin }) => {
   );
 };
 
-const StaffDashboard = ({ user, records, setRecords }) => {
+const StaffDashboard = ({ user }) => {
   const [file, setFile] = useState(null);
   const [loading, setLoading] = useState(false);
   const [preview, setPreview] = useState(null);
   const [result, setResult] = useState(null);
   const [reason, setReason] = useState('');
   const [selectedMonth, setSelectedMonth] = useState(new Date().toISOString().substring(0, 7));
+  const [records, setRecords] = useState([]);
+  const [loadingRecords, setLoadingRecords] = useState(false);
+
+  useEffect(() => {
+    const fetchStaffRecords = async () => {
+      setLoadingRecords(true);
+      try {
+        const { data, error } = await supabase
+          .from('step_records')
+          .select('*')
+          .eq('staff_id', user.id);
+        if (error) throw error;
+        setRecords(data || []);
+      } catch (err) {
+        console.error("Staff fetch error:", err);
+      } finally {
+        setLoadingRecords(false);
+      }
+    };
+    if (user && user.id) {
+      fetchStaffRecords();
+    }
+  }, [user.id]);
 
   const handleExtract = async () => {
     if (!file) return;
@@ -332,7 +355,6 @@ const StaffDashboard = ({ user, records, setRecords }) => {
         staff_id: user.id,
         name: user.name,
         dept: user.dept,
-        department: user.dept,
         steps: stepsNum,
         date: result.date,
         time: result.time,
@@ -457,8 +479,14 @@ const StaffDashboard = ({ user, records, setRecords }) => {
                 <p>Time: {result.time}</p>
               </div>
 
-              <button onClick={handleFinalSubmit} className="btn-primary" style={{ width: '100%' }}>
-                <CheckCircle2 size={18} /> Confirm & Submit Report
+              <button 
+                onClick={handleFinalSubmit} 
+                disabled={loading} 
+                className="btn-primary" 
+                style={{ width: '100%' }}
+              >
+                {loading ? <Loader2 className="animate-spin" size={18} /> : <CheckCircle2 size={18} />}
+                {loading ? 'Submitting...' : 'Confirm & Submit Report'}
               </button>
             </motion.div>
           )}
@@ -486,7 +514,12 @@ const StaffDashboard = ({ user, records, setRecords }) => {
             </div>
           </div>
           <div className="history-list" style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-            {monthlyRecords.length === 0 ? (
+            {loadingRecords ? (
+              <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '8px', padding: '2rem', color: 'var(--text-muted)' }}>
+                <Loader2 className="animate-spin" size={18} />
+                <span>Loading activity history...</span>
+              </div>
+            ) : monthlyRecords.length === 0 ? (
               <p style={{ color: 'var(--text-muted)' }}>No records for this month.</p>
             ) : (
               monthlyRecords.map(rec => (
@@ -511,12 +544,33 @@ const StaffDashboard = ({ user, records, setRecords }) => {
   );
 };
 
-const AdminDashboard = ({ records, setRecords }) => {
+const AdminDashboard = () => {
+  const [records, setRecords] = useState([]);
+  const [loadingRecords, setLoadingRecords] = useState(false);
   const [selectedDate, setSelectedDate] = useState(new Date().toLocaleDateString('en-CA'));
   const [filterDept, setFilterDept] = useState('All');
   const [sortOrder, setSortOrder] = useState('time');
 
-  const filteredRecords = records.filter(r => r.date === selectedDate);
+  useEffect(() => {
+    const fetchAdminRecords = async () => {
+      setLoadingRecords(true);
+      try {
+        const { data, error } = await supabase
+          .from('step_records')
+          .select('*')
+          .eq('date', selectedDate);
+        if (error) throw error;
+        setRecords(data || []);
+      } catch (err) {
+        console.error("Admin fetch error:", err);
+      } finally {
+        setLoadingRecords(false);
+      }
+    };
+    fetchAdminRecords();
+  }, [selectedDate]);
+
+  const filteredRecords = records;
   const totalStaff = mockStaffMembers.length;
   const completedToday = new Set(filteredRecords.filter(r => r.steps >= 5000 || r.reason).map(r => r.staff_id)).size;
 
@@ -695,41 +749,58 @@ const AdminDashboard = ({ records, setRecords }) => {
             </tr>
           </thead>
           <tbody>
-            {displayStaff.map(staff => {
-              const record = filteredRecords.find(r => r.staff_id === staff.id);
-              return (
-                <tr key={staff.id} style={{ borderBottom: '1px solid var(--glass-border)' }}>
-                  <td style={{ padding: '1rem' }}>
-                    <div style={{ fontWeight: 600 }}>{staff.name}</div>
-                    <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>ID: {staff.id}</div>
-                  </td>
-                  <td>{staff.dept}</td>
-                  <td style={{ fontWeight: 'bold', color: (record?.steps >= 5000 || record?.reason) ? '#16a34a' : (record ? '#dc2626' : 'inherit') }}>
-                    {record ? record.steps : '---'}
-                  </td>
-                  <td>{record?.reason || '---'}</td>
-                  <td>{record?.uploaded_time || record?.time || '---'}</td>
-                  <td>
-                    {record ? (
-                      (record.steps >= 5000 || record.reason) ? (
-                        <div className="status-badge status-complete">Completed</div>
+            {loadingRecords ? (
+              <tr>
+                <td colSpan="7" style={{ padding: '2rem', textAlign: 'center', color: 'var(--text-muted)' }}>
+                  <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '8px' }}>
+                    <Loader2 className="animate-spin" size={18} />
+                    <span>Fetching records from cloud...</span>
+                  </div>
+                </td>
+              </tr>
+            ) : displayStaff.length === 0 ? (
+              <tr>
+                <td colSpan="7" style={{ padding: '2rem', textAlign: 'center', color: 'var(--text-muted)' }}>
+                  No staff members found.
+                </td>
+              </tr>
+            ) : (
+              displayStaff.map(staff => {
+                const record = filteredRecords.find(r => r.staff_id === staff.id);
+                return (
+                  <tr key={staff.id} style={{ borderBottom: '1px solid var(--glass-border)' }}>
+                    <td style={{ padding: '1rem' }}>
+                      <div style={{ fontWeight: 600 }}>{staff.name}</div>
+                      <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>ID: {staff.id}</div>
+                    </td>
+                    <td>{staff.dept}</td>
+                    <td style={{ fontWeight: 'bold', color: (record?.steps >= 5000 || record?.reason) ? '#16a34a' : (record ? '#dc2626' : 'inherit') }}>
+                      {record ? record.steps : '---'}
+                    </td>
+                    <td>{record?.reason || '---'}</td>
+                    <td>{record?.uploaded_time || record?.time || '---'}</td>
+                    <td>
+                      {record ? (
+                        (record.steps >= 5000 || record.reason) ? (
+                          <div className="status-badge status-complete">Completed</div>
+                        ) : (
+                          <div className="status-badge status-incomplete">Incomplete</div>
+                        )
                       ) : (
-                        <div className="status-badge status-incomplete">Incomplete</div>
-                      )
-                    ) : (
-                      <span style={{ color: 'var(--text-muted)' }}>Pending</span>
-                    )}
-                  </td>
-                  <td>
-                    {record && (
-                      <button onClick={() => handleDelete(record.id)} style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer' }}>
-                        <Trash2 size={18} />
-                      </button>
-                    )}
-                  </td>
-                </tr>
-              );
-            })}
+                        <span style={{ color: 'var(--text-muted)' }}>Pending</span>
+                      )}
+                    </td>
+                    <td>
+                      {record && (
+                        <button onClick={() => handleDelete(record.id)} style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer' }}>
+                          <Trash2 size={18} />
+                        </button>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })
+            )}
           </tbody>
         </table>
       </div>
@@ -742,22 +813,8 @@ const AdminDashboard = ({ records, setRecords }) => {
 
 function App() {
   const [user, setUser] = useState(null);
-  const [records, setRecords] = useState([]);
 
   useEffect(() => {
-    const fetchCloudRecords = async () => {
-      try {
-        const { data, error } = await supabase
-          .from('step_records')
-          .select('*');
-        if (error) throw error;
-        setRecords(data || []);
-      } catch (err) {
-        console.error("Initial fetch error:", err);
-      }
-    };
-    fetchCloudRecords();
-
     const savedUser = localStorage.getItem('step_user');
     if (savedUser) setUser(JSON.parse(savedUser));
   }, []);
@@ -781,9 +838,9 @@ function App() {
           {!user ? (
             <Login key="login" onLogin={handleLogin} />
           ) : user.role === 'admin' ? (
-            <AdminDashboard key="admin" records={records} setRecords={setRecords} />
+            <AdminDashboard key="admin" />
           ) : (
-            <StaffDashboard key="staff" user={user} records={records} setRecords={setRecords} />
+            <StaffDashboard key="staff" user={user} />
           )}
         </AnimatePresence>
       </main>
