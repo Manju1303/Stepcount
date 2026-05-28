@@ -27,54 +27,91 @@ export const tokenize = (text) => {
 };
 
 const UNITS = ['cal', 'kcal', 'calories', 'mi', 'miles', 'km', 'kilometers', 'min', 'mins', 'minutes', 'bpm', 'kg', 'lbs', 'move'];
+const STEPS_KEYWORDS = ['steps', 'step', 'staps', 'stept', 'sleps', 'stepe', 'stps', 'slps', 'stept', 'stesp', 'sreps', 'siers', 's1eps'];
 
 export const extractSteps = (tokens) => {
-  let potentialSteps = [];
-  
+  let candidates = [];
+
   for (let i = 0; i < tokens.length; i++) {
     const t = tokens[i];
-    
+
     // Check if token is a whole number
     if (/^\d+$/.test(t)) {
       const val = parseInt(t);
-      if (val > 150000) continue; // Out of range
+      if (val > 150000 || val < 1) continue; // Out of range
 
       let isUnitValue = false;
-      
-      // Look around (distance 1 and 2) for units to ignore
-      const neighbors = [
-        tokens[i - 1], tokens[i + 1],
-        tokens[i - 2], tokens[i + 2]
-      ];
+      let unitDistance = 99;
+      let hasStepsKeyword = false;
+      let stepsDistance = 99;
 
-      for (const n of neighbors) {
-        if (n && UNITS.includes(n.toLowerCase())) {
-          isUnitValue = true;
-          break;
+      // Check neighbors in range [-3, 3] to identify context
+      for (let offset = -3; offset <= 3; offset++) {
+        if (offset === 0) continue;
+        const neighbor = tokens[i + offset];
+        if (neighbor) {
+          // Normalize neighbor by removing non-alphabetic characters (e.g. "steps:" -> "steps")
+          const cleanNeighbor = neighbor.toLowerCase().replace(/[^a-z0-9]/g, '');
+
+          if (UNITS.includes(cleanNeighbor)) {
+            isUnitValue = true;
+            const dist = Math.abs(offset);
+            if (dist < unitDistance) {
+              unitDistance = dist;
+            }
+          }
+
+          if (STEPS_KEYWORDS.includes(cleanNeighbor)) {
+            hasStepsKeyword = true;
+            const dist = Math.abs(offset);
+            if (dist < stepsDistance) {
+              stepsDistance = dist;
+            }
+          }
         }
       }
 
-      // Special case: if "steps" is also nearby, it might be steps even if other units are near (unlikely but possible)
-      const isStepsLabeled = (tokens[i-1] === 'steps' || tokens[i+1] === 'steps');
-      
-      if (isUnitValue && !isStepsLabeled) {
-        continue;
+      let score = 0;
+      // Only recognize steps keyword if it is closer or equal to any unit keyword (prevent calorie/distance confusion)
+      if (hasStepsKeyword && stepsDistance <= unitDistance) {
+        if (stepsDistance === 1) {
+          score = 10;
+        } else if (stepsDistance === 2) {
+          score = 8;
+        } else {
+          score = 5;
+        }
+      } else if (!isUnitValue) {
+        // Unlabeled candidate: give higher weight if it looks like a typical step count
+        score = val >= 100 ? 1 : 0.1;
       }
-      
-      potentialSteps.push(val);
+
+      if (score > 0) {
+        candidates.push({ val, score });
+      }
     }
   }
 
-  if (potentialSteps.length > 0) {
-    // Priority 1: Numbers labeled with "steps"
-    // (None in this basic implementation, we just use the candidates)
-    
-    const stepsCandidates = potentialSteps.filter(n => n > 100);
-    if (stepsCandidates.length > 0) {
-      return Math.max(...stepsCandidates);
-    } else {
-      return Math.max(...potentialSteps);
+  if (candidates.length === 0) {
+    return 0;
+  }
+
+  // Find the highest score among all candidates
+  const maxScore = Math.max(...candidates.map(c => c.score));
+
+  if (maxScore >= 5) {
+    // If we have step-labeled candidates, return the maximum value among them
+    const labeledCandidates = candidates.filter(c => c.score >= 5);
+    return Math.max(...labeledCandidates.map(c => c.val));
+  } else {
+    // Otherwise, return the maximum value of the unlabeled candidates (score >= 1)
+    const unlabeledCandidates = candidates.filter(c => c.score >= 1);
+    if (unlabeledCandidates.length > 0) {
+      return Math.max(...unlabeledCandidates.map(c => c.val));
     }
   }
-  return 0;
+
+  // Fallback to the absolute maximum of whatever is left (e.g. values < 100)
+  return Math.max(...candidates.map(c => c.val));
 };
+

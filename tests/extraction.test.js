@@ -53,4 +53,41 @@ describe('Step Count Extraction Logic', () => {
     
     expect(steps).toBe(10245);
   });
+
+  it('should handle small step counts labeled with steps', () => {
+    const ocrText = "Active steps today: 84";
+    const cleaned = cleanText(ocrText);
+    const tokens = tokenize(cleaned);
+    const steps = extractSteps(tokens);
+    
+    expect(steps).toBe(84);
+  });
+
+  it('should prioritize steps count even with spelling errors from OCR', () => {
+    const ocrText = "today sreps 10245 cal 450";
+    const cleaned = cleanText(ocrText);
+    const tokens = tokenize(cleaned);
+    const steps = extractSteps(tokens);
+    
+    expect(steps).toBe(10245);
+  });
+
+  it('should ignore punctuation attached to steps keyword', () => {
+    const ocrText = "active stps: 6542";
+    const cleaned = cleanText(ocrText);
+    const tokens = tokenize(cleaned);
+    const steps = extractSteps(tokens);
+    
+    expect(steps).toBe(6542);
+  });
+
+  it('should prioritize step-labeled number over unlabeled clock times', () => {
+    const ocrText = "1035 siers 12500";
+    const cleaned = cleanText(ocrText);
+    const tokens = tokenize(cleaned);
+    const steps = extractSteps(tokens);
+    
+    expect(steps).toBe(12500);
+  });
 });
+

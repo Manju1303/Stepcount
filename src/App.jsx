@@ -28,7 +28,7 @@ import header from './assets/header.png';
 
 // --- Services ---
 
-const preprocessImage = (imageSrc) => {
+const preprocessImage = (imageSrc, shouldCrop = true) => {
   return new Promise((resolve, reject) => {
     const img = new Image();
     img.onload = () => {
@@ -36,14 +36,14 @@ const preprocessImage = (imageSrc) => {
       const ctx = canvas.getContext('2d');
 
       const ratio = img.height / img.width;
-      const isFullPortrait = ratio > 1.7; // Standard phone screen ratio
+      const isFullPortrait = ratio > 1.7 && shouldCrop; // Standard phone screen ratio & crop allowed
 
-      // Only crop if it's a full-length portrait screenshot
-      // Otherwise (smartwatch, square, or pre-cropped), use the whole image
+      // Only crop if it's a full-length portrait screenshot and cropping is enabled
+      // Otherwise (smartwatch, square, pre-cropped, or fallback), use the whole image
       const cropX = isFullPortrait ? img.width * 0.05 : 0;
       const cropY = isFullPortrait ? img.height * 0.10 : 0;
       const cropWidth = isFullPortrait ? img.width * 0.90 : img.width;
-      const cropHeight = isFullPortrait ? img.height * 0.50 : img.height; // Wider area (50% of screen)
+      const cropHeight = isFullPortrait ? img.height * 0.50 : img.height;
 
       canvas.width = cropWidth * 2;
       canvas.height = cropHeight * 2;
@@ -56,9 +56,20 @@ const preprocessImage = (imageSrc) => {
 
       const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
       const data = imgData.data;
+
+      // Convert to grayscale & stretch contrast
+      const factor = 1.6; // Contrast adjustment factor
       for (let i = 0; i < data.length; i += 4) {
         const avg = data[i] * 0.299 + data[i + 1] * 0.587 + data[i + 2] * 0.114;
-        data[i] = data[i + 1] = data[i + 2] = avg;
+        
+        // Increase contrast: factor * (gray - 128) + 128
+        let contrastColor = factor * (avg - 128) + 128;
+        
+        // Clamp to 0-255
+        if (contrastColor < 0) contrastColor = 0;
+        if (contrastColor > 255) contrastColor = 255;
+
+        data[i] = data[i + 1] = data[i + 2] = contrastColor;
       }
       ctx.putImageData(imgData, 0, 0);
       resolve(canvas.toDataURL('image/png'));
@@ -69,13 +80,23 @@ const preprocessImage = (imageSrc) => {
 };
 
 const processScreenshot = async (image) => {
-  const processedImage = await preprocessImage(image);
-  const result = await Tesseract.recognize(processedImage, 'eng');
-  const text = result.data.text;
+  // Pass 1: Try processing with cropping
+  let processedImage = await preprocessImage(image, true);
+  let result = await Tesseract.recognize(processedImage, 'eng');
+  let text = result.data.text;
+  let cleaned = cleanText(text);
+  let tokens = tokenize(cleaned);
+  let steps = extractSteps(tokens);
 
-  const cleaned = cleanText(text);
-  const tokens = tokenize(cleaned);
-  const steps = extractSteps(tokens);
+  // Pass 2: Fallback to full uncropped image if 0 steps found (common for smartwatch photos)
+  if (steps === 0) {
+    processedImage = await preprocessImage(image, false);
+    result = await Tesseract.recognize(processedImage, 'eng');
+    text = result.data.text;
+    cleaned = cleanText(text);
+    tokens = tokenize(cleaned);
+    steps = extractSteps(tokens);
+  }
 
   const now = new Date();
   const date = now.toLocaleDateString('en-CA');
@@ -242,7 +263,7 @@ const Navbar = ({ user, onLogout }) => (
       <div className="logo-icon" style={{ background: 'var(--primary)', padding: '8px', borderRadius: '12px' }}>
         <Zap size={24} color="white" />
       </div>
-      <h2 className="title-gradient">Antigravity Steps</h2>
+      <h2 className="title-gradient">StepSync</h2>
     </div>
     {user && (
       <button onClick={onLogout} className="btn-primary" style={{ background: '#fee2e2', color: '#ef4444', border: '1px solid #fecaca' }}>
@@ -846,7 +867,7 @@ function App() {
       </main>
 
       <footer style={{ textAlign: 'center', padding: '4rem 0', color: 'var(--text-muted)', fontSize: '0.9rem' }}>
-        &copy; 2026 Antigravity Step Monitoring System • Faculty Wellness Initiative
+        &copy; 2026 StepSync Monitoring System • Faculty Wellness Initiative
       </footer>
     </div>
   );
