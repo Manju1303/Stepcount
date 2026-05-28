@@ -263,7 +263,7 @@ const Navbar = ({ user, onLogout }) => (
       <div className="logo-icon" style={{ background: 'var(--primary)', padding: '8px', borderRadius: '12px' }}>
         <Zap size={24} color="white" />
       </div>
-      <h2 className="title-gradient">StepSync</h2>
+      <h2 className="title-gradient">Staff Fit</h2>
     </div>
     {user && (
       <button onClick={onLogout} className="btn-primary" style={{ background: '#fee2e2', color: '#ef4444', border: '1px solid #fecaca' }}>
@@ -867,7 +867,7 @@ function App() {
       </main>
 
       <footer style={{ textAlign: 'center', padding: '4rem 0', color: 'var(--text-muted)', fontSize: '0.9rem' }}>
-        &copy; 2026 StepSync Monitoring System • Faculty Wellness Initiative
+        &copy; 2026 Staff Fit Monitoring System • Faculty Wellness Initiative
       </footer>
     </div>
   );
