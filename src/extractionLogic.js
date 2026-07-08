@@ -111,8 +111,8 @@ export const extractSteps = (tokens) => {
       let hasStepsKeyword = false;
       let stepsDistance = 99;
 
-      // Check neighbors in range [-3, 3] to identify context
-      for (let offset = -3; offset <= 3; offset++) {
+      // Check neighbors in range [-5, 5] to identify context
+      for (let offset = -5; offset <= 5; offset++) {
         if (offset === 0) continue;
         const neighbor = tokens[i + offset];
         if (neighbor) {
@@ -143,9 +143,13 @@ export const extractSteps = (tokens) => {
         if (stepsDistance === 1) {
           score = 10;
         } else if (stepsDistance === 2) {
+          score = 9;
+        } else if (stepsDistance === 3) {
           score = 8;
+        } else if (stepsDistance === 4) {
+          score = 7;
         } else {
-          score = 5;
+          score = 6;
         }
       } else if (!isUnitValue) {
         // Unlabeled candidate: give higher weight if it looks like a typical step count

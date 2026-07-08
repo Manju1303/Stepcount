@@ -121,5 +121,13 @@ describe('Step Count Extraction Logic', () => {
     const steps = extractSteps(tokens);
     expect(steps).toBe(124560);
   });
+
+  it('should correctly extract steps from Google Fit circular ring layout with thousand separator period', () => {
+    const ocrText = "37 5.117 Heart Pts Steps 1.619 Cal 2.2 mi 48 Move Min";
+    const cleaned = cleanText(ocrText);
+    const tokens = tokenize(cleaned);
+    const steps = extractSteps(tokens);
+    expect(steps).toBe(5117);
+  });
 });
 
