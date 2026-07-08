@@ -1,6 +1,40 @@
 
+export const getLevenshteinDistance = (a, b) => {
+  if (a.length === 0) return b.length;
+  if (b.length === 0) return a.length;
+
+  const matrix = [];
+
+  for (let i = 0; i <= b.length; i++) {
+    matrix[i] = [i];
+  }
+
+  for (let j = 0; j <= a.length; j++) {
+    matrix[0][j] = j;
+  }
+
+  for (let i = 1; i <= b.length; i++) {
+    for (let j = 1; j <= a.length; j++) {
+      if (b.charAt(i - 1) === a.charAt(j - 1)) {
+        matrix[i][j] = matrix[i - 1][j - 1];
+      } else {
+        matrix[i][j] = Math.min(
+          matrix[i - 1][j - 1] + 1, // substitution
+          matrix[i][j - 1] + 1,     // insertion
+          matrix[i - 1][j] + 1      // deletion
+        );
+      }
+    }
+  }
+
+  return matrix[b.length][a.length];
+};
+
 export const cleanText = (text) => {
-  return text.toLowerCase().replace(/,/g, '');
+  let cleaned = text.toLowerCase().replace(/,/g, '');
+  // Replace periods that act as thousand separators (followed by exactly 3 digits and no more digits)
+  cleaned = cleaned.replace(/(\d+)\.(\d{3})(?!\d)/g, '$1$2');
+  return cleaned;
 };
 
 export const tokenize = (text) => {
@@ -28,6 +62,38 @@ export const tokenize = (text) => {
 
 const UNITS = ['cal', 'kcal', 'calories', 'mi', 'miles', 'km', 'kilometers', 'min', 'mins', 'minutes', 'bpm', 'kg', 'lbs', 'move'];
 const STEPS_KEYWORDS = ['steps', 'step', 'staps', 'stept', 'sleps', 'stepe', 'stps', 'slps', 'stept', 'stesp', 'sreps', 'siers', 's1eps'];
+
+export const isStepsKeyword = (word) => {
+  const cleanWord = word.toLowerCase().replace(/[^a-z0-9]/g, '');
+  
+  if (STEPS_KEYWORDS.includes(cleanWord)) {
+    return true;
+  }
+
+  // Check Levenshtein distance to "steps"
+  if (cleanWord.length >= 4 && cleanWord.length <= 6) {
+    const distToSteps = getLevenshteinDistance(cleanWord, 'steps');
+    if (distToSteps <= 2) {
+      const exclusions = ['sleep', 'stops', 'stop', 'steep', 'stems', 'stars', 'strip', 'state'];
+      if (!exclusions.includes(cleanWord)) {
+        return true;
+      }
+    }
+  }
+  
+  // Check Levenshtein distance to "step"
+  if (cleanWord.length === 3 || cleanWord.length === 4) {
+    const distToStep = getLevenshteinDistance(cleanWord, 'step');
+    if (distToStep <= 1) {
+      const exclusions = ['stop', 'shop', 'ship', 'stem', 'site'];
+      if (!exclusions.includes(cleanWord)) {
+        return true;
+      }
+    }
+  }
+
+  return false;
+};
 
 export const extractSteps = (tokens) => {
   let candidates = [];
@@ -61,7 +127,7 @@ export const extractSteps = (tokens) => {
             }
           }
 
-          if (STEPS_KEYWORDS.includes(cleanNeighbor)) {
+          if (isStepsKeyword(cleanNeighbor)) {
             hasStepsKeyword = true;
             const dist = Math.abs(offset);
             if (dist < stepsDistance) {

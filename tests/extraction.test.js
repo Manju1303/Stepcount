@@ -89,5 +89,37 @@ describe('Step Count Extraction Logic', () => {
     
     expect(steps).toBe(12500);
   });
+
+  it('should handle period thousand separators', () => {
+    const ocrText = "steps: 12.560 kcal: 450";
+    const cleaned = cleanText(ocrText);
+    const tokens = tokenize(cleaned);
+    const steps = extractSteps(tokens);
+    expect(steps).toBe(12560);
+  });
+
+  it('should fuzzy match step keywords with typos', () => {
+    const ocrText = "stcps 8420 calories 350";
+    const cleaned = cleanText(ocrText);
+    const tokens = tokenize(cleaned);
+    const steps = extractSteps(tokens);
+    expect(steps).toBe(8420);
+  });
+
+  it('should ignore calorie and distance numbers even with period normalizations', () => {
+    const ocrText = "steps 10.537 distance 2.020 mi cal 350.250";
+    const cleaned = cleanText(ocrText);
+    const tokens = tokenize(cleaned);
+    const steps = extractSteps(tokens);
+    expect(steps).toBe(10537);
+  });
+
+  it('should handle very large step counts', () => {
+    const ocrText = "steps: 124,560";
+    const cleaned = cleanText(ocrText);
+    const tokens = tokenize(cleaned);
+    const steps = extractSteps(tokens);
+    expect(steps).toBe(124560);
+  });
 });
 

@@ -56,9 +56,11 @@ const preprocessImage = (imageSrc, shouldCrop = true) => {
 
       const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
       const data = imgData.data;
+      const width = canvas.width;
+      const height = canvas.height;
 
       // Convert to grayscale & stretch contrast
-      const factor = 1.6; // Contrast adjustment factor
+      const factor = 2.0; // Stronger contrast adjustment factor
       for (let i = 0; i < data.length; i += 4) {
         const avg = data[i] * 0.299 + data[i + 1] * 0.587 + data[i + 2] * 0.114;
         
@@ -71,6 +73,26 @@ const preprocessImage = (imageSrc, shouldCrop = true) => {
 
         data[i] = data[i + 1] = data[i + 2] = contrastColor;
       }
+
+      // Fast sharpening pass (since image is grayscale, we only process Red channel and copy to G & B)
+      const clone = new Uint8ClampedArray(data);
+      for (let y = 1; y < height - 1; y++) {
+        for (let x = 1; x < width - 1; x++) {
+          const dstOff = (y * width + x) * 4;
+          
+          let val = 0;
+          // Apply 3x3 sharpening kernel
+          val += clone[((y - 1) * width + x) * 4] * -1;
+          val += clone[(y * width + (x - 1)) * 4] * -1;
+          val += clone[(y * width + x) * 4] * 5;
+          val += clone[(y * width + (x + 1)) * 4] * -1;
+          val += clone[((y + 1) * width + x) * 4] * -1;
+          
+          const finalVal = val < 0 ? 0 : (val > 255 ? 255 : val);
+          data[dstOff] = data[dstOff + 1] = data[dstOff + 2] = finalVal;
+        }
+      }
+
       ctx.putImageData(imgData, 0, 0);
       resolve(canvas.toDataURL('image/png'));
     };
