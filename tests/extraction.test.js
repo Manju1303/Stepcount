@@ -129,5 +129,25 @@ describe('Step Count Extraction Logic', () => {
     const steps = extractSteps(tokens);
     expect(steps).toBe(5117);
   });
+
+  it('should not treat steps as a unit value if a unit keyword is far away (> 2 tokens)', () => {
+    const ocrText = "5117 Heart Pts Steps 1619 Cal";
+    const cleaned = cleanText(ocrText);
+    const tokens = tokenize(cleaned);
+    const steps = extractSteps(tokens);
+    expect(steps).toBe(5117);
+  });
+
+  it('should handle thousand separators with extra spaces or different symbols', () => {
+    const ocrText = "steps: 5. 117 or 12 500 steps";
+    
+    const cleaned1 = cleanText("steps: 5. 117");
+    const steps1 = extractSteps(tokenize(cleaned1));
+    expect(steps1).toBe(5117);
+    
+    const cleaned2 = cleanText("12 500 steps");
+    const steps2 = extractSteps(tokenize(cleaned2));
+    expect(steps2).toBe(12500);
+  });
 });
 

@@ -31,9 +31,18 @@ export const getLevenshteinDistance = (a, b) => {
 };
 
 export const cleanText = (text) => {
-  let cleaned = text.toLowerCase().replace(/,/g, '');
-  // Replace periods that act as thousand separators (followed by exactly 3 digits and no more digits)
-  cleaned = cleaned.replace(/(\d+)\.(\d{3})(?!\d)/g, '$1$2');
+  let cleaned = text.toLowerCase();
+  
+  // Normalize thousand separators iteratively (handles comma, period, or space followed by exactly 3 digits)
+  // E.g., "5,117" -> "5117", "5.117" -> "5117", "5 117" -> "5117", "5. 117" -> "5117"
+  const separatorRegex = /\b(\d{1,3})\s*[.,\s]\s*(\d{3})\b/g;
+  while (separatorRegex.test(cleaned)) {
+    cleaned = cleaned.replace(separatorRegex, '$1$2');
+  }
+  
+  // Remove remaining commas
+  cleaned = cleaned.replace(/,/g, '');
+  
   return cleaned;
 };
 
@@ -120,10 +129,14 @@ export const extractSteps = (tokens) => {
           const cleanNeighbor = neighbor.toLowerCase().replace(/[^a-z0-9]/g, '');
 
           if (UNITS.includes(cleanNeighbor)) {
-            isUnitValue = true;
             const dist = Math.abs(offset);
-            if (dist < unitDistance) {
-              unitDistance = dist;
+            // Units only apply to a value if they are directly adjacent (dist <= 2)
+            // This prevents column layout cross-talk where a unit in another column is mistaken for this value's unit.
+            if (dist <= 2) {
+              isUnitValue = true;
+              if (dist < unitDistance) {
+                unitDistance = dist;
+              }
             }
           }
 

@@ -59,37 +59,29 @@ const preprocessImage = (imageSrc, shouldCrop = true) => {
       const width = canvas.width;
       const height = canvas.height;
 
-      // Convert to grayscale & stretch contrast
-      const factor = 2.0; // Stronger contrast adjustment factor
+      // Calculate average brightness to auto-detect light/dark mode
+      let totalBrightness = 0;
       for (let i = 0; i < data.length; i += 4) {
-        const avg = data[i] * 0.299 + data[i + 1] * 0.587 + data[i + 2] * 0.114;
-        
-        // Increase contrast: factor * (gray - 128) + 128
-        let contrastColor = factor * (avg - 128) + 128;
-        
-        // Clamp to 0-255
-        if (contrastColor < 0) contrastColor = 0;
-        if (contrastColor > 255) contrastColor = 255;
-
-        data[i] = data[i + 1] = data[i + 2] = contrastColor;
+        totalBrightness += data[i] * 0.299 + data[i + 1] * 0.587 + data[i + 2] * 0.114;
       }
+      const avgBrightness = totalBrightness / (data.length / 4);
 
-      // Fast sharpening pass (since image is grayscale, we only process Red channel and copy to G & B)
-      const clone = new Uint8ClampedArray(data);
-      for (let y = 1; y < height - 1; y++) {
-        for (let x = 1; x < width - 1; x++) {
-          const dstOff = (y * width + x) * 4;
-          
-          let val = 0;
-          // Apply 3x3 sharpening kernel
-          val += clone[((y - 1) * width + x) * 4] * -1;
-          val += clone[(y * width + (x - 1)) * 4] * -1;
-          val += clone[(y * width + x) * 4] * 5;
-          val += clone[(y * width + (x + 1)) * 4] * -1;
-          val += clone[((y + 1) * width + x) * 4] * -1;
-          
-          const finalVal = val < 0 ? 0 : (val > 255 ? 255 : val);
-          data[dstOff] = data[dstOff + 1] = data[dstOff + 2] = finalVal;
+      // Perform adaptive binarization
+      if (avgBrightness > 127) {
+        // Light background mode (e.g. phone white theme)
+        // Convert any colored/dark text (brightness < 200) to pure black, and everything else to white.
+        for (let i = 0; i < data.length; i += 4) {
+          const avg = data[i] * 0.299 + data[i + 1] * 0.587 + data[i + 2] * 0.114;
+          const finalVal = avg < 200 ? 0 : 255;
+          data[i] = data[i + 1] = data[i + 2] = finalVal;
+        }
+      } else {
+        // Dark background mode (e.g. smartwatch dark theme)
+        // Convert any colored/light text (brightness > 55) to pure white, and everything else to black.
+        for (let i = 0; i < data.length; i += 4) {
+          const avg = data[i] * 0.299 + data[i + 1] * 0.587 + data[i + 2] * 0.114;
+          const finalVal = avg > 55 ? 255 : 0;
+          data[i] = data[i + 1] = data[i + 2] = finalVal;
         }
       }
 
