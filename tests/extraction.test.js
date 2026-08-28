@@ -1,8 +1,9 @@
 
 import { describe, it, expect } from 'vitest';
-import { cleanText, tokenize, extractSteps } from '../src/extractionLogic';
+import { cleanText, tokenize, extractSteps, detect90DayDuplicates, findDuplicateAlertsInPeriod } from '../src/extractionLogic';
 
 describe('Step Count Extraction Logic', () => {
+
   it('should correctly extract steps from the provided screenshot scenario', () => {
     const ocrText = "6 5,537 Heart Pts Steps 1,548 Cal 2.02 mi 65 Move Min";
     const cleaned = cleanText(ocrText);
@@ -149,5 +150,73 @@ describe('Step Count Extraction Logic', () => {
     const steps2 = extractSteps(tokenize(cleaned2));
     expect(steps2).toBe(12500);
   });
+
+  it('should correctly extract steps from smartwatch display with goal ratio slash like 3500/10000', () => {
+    const ocrText = "STEPS 3500/10000 45 CAL 30 MIN";
+    const cleaned = cleanText(ocrText);
+    const tokens = tokenize(cleaned);
+    const steps = extractSteps(tokens);
+    expect(steps).toBe(3500);
+  });
 });
+
+describe('90-Day Duplicate Step Count Detection System', () => {
+  const existingRecords = [
+    { id: 1, staff_id: 'cse001', name: 'Dr. N. Sathyabalaji', dept: 'CSE', steps: 8520, date: '2026-08-01', uploaded_time: '09:30 AM' },
+    { id: 2, staff_id: 'it001', name: 'Mr. S. Pradeepan', dept: 'IT', steps: 10450, date: '2026-08-10', uploaded_time: '10:15 AM' },
+    { id: 3, staff_id: 'cse002', name: 'Mr. E. Ananth', dept: 'CSE', steps: 6200, date: '2026-06-01', uploaded_time: '08:00 AM' }
+  ];
+
+  it('should detect duplicate step count submitted within 90 days by another staff member', () => {
+    const newSubmission = {
+      staff_id: 'ece001',
+      name: 'Mr. A. Vigneshkumar',
+      dept: 'ECE',
+      steps: 8520,
+      date: '2026-08-28',
+      uploaded_time: '11:00 AM'
+    };
+
+    const result = detect90DayDuplicates(newSubmission, existingRecords, 90);
+    expect(result.isDuplicate).toBe(true);
+    expect(result.matches.length).toBe(1);
+    expect(result.matches[0].name).toBe('Dr. N. Sathyabalaji');
+    expect(result.matches[0].steps).toBe(8520);
+  });
+
+  it('should ignore matching step counts outside the 90-day window', () => {
+    const newSubmission = {
+      staff_id: 'ece002',
+      name: 'Mrs. U. Sasikala',
+      dept: 'ECE',
+      steps: 6200, // Matches record #3 from 2026-06-01 (~88 days ago if now is Aug 28, but let's test 100 days)
+      date: '2026-09-20',
+      uploaded_time: '02:00 PM'
+    };
+
+    const result = detect90DayDuplicates(newSubmission, existingRecords, 90);
+    expect(result.isDuplicate).toBe(false);
+  });
+
+  it('should generate admin duplicate alerts with first and last uploaded timestamps', () => {
+    const allRecords = [
+      ...existingRecords,
+      { id: 4, staff_id: 'cse001', name: 'Dr. N. Sathyabalaji', dept: 'CSE', steps: 8520, date: '2026-08-28', uploaded_time: '11:30 AM' }
+    ];
+
+    const alerts = findDuplicateAlertsInPeriod(allRecords, 90);
+    expect(alerts.length).toBe(1);
+    expect(alerts[0].steps).toBe(8520);
+    expect(alerts[0].isSameStaff).toBe(true);
+    expect(alerts[0].firstUploaded.name).toBe('Dr. N. Sathyabalaji');
+    expect(alerts[0].firstUploaded.date).toBe('2026-08-01');
+    expect(alerts[0].firstUploaded.timestampStr).toBe('2026-08-01 at 09:30 AM');
+    expect(alerts[0].lastUploaded.name).toBe('Dr. N. Sathyabalaji');
+    expect(alerts[0].lastUploaded.date).toBe('2026-08-28');
+    expect(alerts[0].lastUploaded.timestampStr).toBe('2026-08-28 at 11:30 AM');
+    expect(alerts[0].daysDifference).toBe(27);
+  });
+});
+
+
 

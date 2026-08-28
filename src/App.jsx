@@ -14,14 +14,18 @@ import {
   Trash2,
   AlertCircle,
   Trophy,
-  TrendingDown
+  TrendingDown,
+  AlertTriangle,
+  Bell,
+  Clock,
+  ShieldAlert
 } from 'lucide-react';
 import Tesseract from 'tesseract.js';
 import ExcelJS from 'exceljs';
 import { saveAs } from 'file-saver';
 import { mockStaffMembers, ADMIN_CREDENTIALS } from './data';
 import { supabase } from './supabaseClient';
-import { cleanText, tokenize, extractSteps } from './extractionLogic';
+import { cleanText, tokenize, extractSteps, detect90DayDuplicates, findDuplicateAlertsInPeriod } from './extractionLogic';
 import logo from './assets/logo.png';
 import header from './assets/header.png';
 
@@ -93,8 +97,41 @@ const preprocessImage = (imageSrc, shouldCrop = true) => {
   });
 };
 
+// Specialized contrast enhancer for real smartwatch camera photos taken on staff wrists
+const preprocessSmartwatchPhoto = (imageSrc) => {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => {
+      const canvas = document.createElement('canvas');
+      const ctx = canvas.getContext('2d');
+      canvas.width = img.width * 2;
+      canvas.height = img.height * 2;
+
+      ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+      const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+      const data = imgData.data;
+
+      // Apply Grayscale + Contrast boost (1.6x) to preserve watch screen text against skin/ambient background
+      const contrast = 40;
+      const factor = (259 * (contrast + 255)) / (255 * (259 - contrast));
+
+      for (let i = 0; i < data.length; i += 4) {
+        const gray = data[i] * 0.299 + data[i + 1] * 0.587 + data[i + 2] * 0.114;
+        const contrastVal = factor * (gray - 128) + 128;
+        const finalVal = Math.min(255, Math.max(0, contrastVal));
+        data[i] = data[i + 1] = data[i + 2] = finalVal;
+      }
+
+      ctx.putImageData(imgData, 0, 0);
+      resolve(canvas.toDataURL('image/png'));
+    };
+    img.onerror = reject;
+    img.src = imageSrc;
+  });
+};
+
 const processScreenshot = async (image) => {
-  // Pass 1: Try processing with cropping
+  // Pass 1: Try processing with standard portrait cropping
   let processedImage = await preprocessImage(image, true);
   let result = await Tesseract.recognize(processedImage, 'eng');
   let text = result.data.text;
@@ -102,9 +139,19 @@ const processScreenshot = async (image) => {
   let tokens = tokenize(cleaned);
   let steps = extractSteps(tokens);
 
-  // Pass 2: Fallback to full uncropped image if 0 steps found (common for smartwatch photos)
+  // Pass 2: Fallback to full uncropped image if 0 steps found (common for cropped smartwatch images)
   if (steps === 0) {
     processedImage = await preprocessImage(image, false);
+    result = await Tesseract.recognize(processedImage, 'eng');
+    text = result.data.text;
+    cleaned = cleanText(text);
+    tokens = tokenize(cleaned);
+    steps = extractSteps(tokens);
+  }
+
+  // Pass 3: Smartwatch camera photo on wrist fallback (ambient lighting & skin background)
+  if (steps === 0) {
+    processedImage = await preprocessSmartwatchPhoto(image);
     result = await Tesseract.recognize(processedImage, 'eng');
     text = result.data.text;
     cleaned = cleanText(text);
@@ -581,6 +628,8 @@ const StaffDashboard = ({ user }) => {
 
 const AdminDashboard = () => {
   const [records, setRecords] = useState([]);
+  const [all90DayRecords, setAll90DayRecords] = useState([]);
+  const [duplicateAlerts, setDuplicateAlerts] = useState([]);
   const [loadingRecords, setLoadingRecords] = useState(false);
   const [selectedDate, setSelectedDate] = useState(new Date().toLocaleDateString('en-CA'));
   const [filterDept, setFilterDept] = useState('All');
@@ -590,12 +639,27 @@ const AdminDashboard = () => {
     const fetchAdminRecords = async () => {
       setLoadingRecords(true);
       try {
+        // Calculate 90 days ago cutoff date string
+        const ninetyDaysAgo = new Date();
+        ninetyDaysAgo.setDate(ninetyDaysAgo.getDate() - 90);
+        const cutoffStr = ninetyDaysAgo.toISOString().substring(0, 10);
+
         const { data, error } = await supabase
           .from('step_records')
           .select('*')
-          .eq('date', selectedDate);
+          .gte('date', cutoffStr);
+          
         if (error) throw error;
-        setRecords(data || []);
+        
+        const allFetched = data || [];
+        setAll90DayRecords(allFetched);
+
+        // Detect 90-day duplicate screenshot / step count alerts across all staff
+        const alerts = findDuplicateAlertsInPeriod(allFetched, 90);
+        setDuplicateAlerts(alerts);
+
+        // Filter records for current selected date view
+        setRecords(allFetched.filter(r => r.date === selectedDate));
       } catch (err) {
         console.error("Admin fetch error:", err);
       } finally {
@@ -654,6 +718,9 @@ const AdminDashboard = () => {
 
       if (error) throw error;
       setRecords(prev => prev.filter(r => r.id !== id));
+      setAll90DayRecords(prev => prev.filter(r => r.id !== id));
+      // Refresh duplicate alerts
+      setDuplicateAlerts(prev => prev.filter(a => a.firstUploaded.id !== id && a.lastUploaded.id !== id));
     } catch (err) {
       alert("Delete failed: " + err.message);
     }
@@ -668,7 +735,7 @@ const AdminDashboard = () => {
           <p style={{ margin: 0, color: 'var(--text-muted)', fontWeight: 500 }}>Step Count Monitoring System • Admin Panel</p>
         </div>
       </div>
-      <div className="admin-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '1.5rem', marginBottom: '2rem' }}>
+      <div className="admin-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '1.5rem', marginBottom: '2rem' }}>
         <div className="glass-card" style={{ textAlign: 'center' }}>
           <h4 style={{ color: 'var(--text-muted)', marginBottom: '0.5rem' }}>Total Staff</h4>
           <h1 className="title-gradient">{totalStaff}</h1>
@@ -681,7 +748,66 @@ const AdminDashboard = () => {
           <h4 style={{ color: 'var(--text-muted)', marginBottom: '0.5rem' }}>Incomplete</h4>
           <h1 style={{ color: 'var(--accent)' }}>{totalStaff - completedToday}</h1>
         </div>
+        <div className="glass-card" style={{ textAlign: 'center', border: duplicateAlerts.length > 0 ? '1px solid #fed7aa' : 'var(--glass-border)', background: duplicateAlerts.length > 0 ? '#fff7ed' : 'white' }}>
+          <h4 style={{ color: duplicateAlerts.length > 0 ? '#c2410c' : 'var(--text-muted)', marginBottom: '0.5rem', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }}>
+            <Bell size={16} /> 90-Day Duplicate Alerts
+          </h4>
+          <h1 style={{ color: duplicateAlerts.length > 0 ? '#ea580c' : 'var(--text-muted)' }}>{duplicateAlerts.length}</h1>
+        </div>
       </div>
+
+      {/* 90-Day Duplicate Step Count Alert Notification Panel */}
+      {duplicateAlerts.length > 0 && (
+        <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} className="glass-card" style={{ marginBottom: '2rem', background: '#fff7ed', border: '1px solid #ffedd5', padding: '1.5rem', borderRadius: '16px' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+              <div style={{ background: '#ea580c', padding: '8px', borderRadius: '10px', color: 'white', display: 'flex' }}>
+                <ShieldAlert size={22} />
+              </div>
+              <div>
+                <h3 style={{ margin: 0, color: '#9a3412', fontSize: '1.2rem' }}>90-Day Duplicate Step Count Notifications</h3>
+                <p style={{ margin: 0, color: '#c2410c', fontSize: '0.85rem' }}>Automated alerts for identical step counts uploaded within the last 90 days</p>
+              </div>
+            </div>
+            <span style={{ background: '#ea580c', color: 'white', fontWeight: 'bold', padding: '4px 12px', borderRadius: '20px', fontSize: '0.8rem' }}>
+              {duplicateAlerts.length} Flagged {duplicateAlerts.length === 1 ? 'Anomaly' : 'Anomalies'}
+            </span>
+          </div>
+
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+            {duplicateAlerts.map(alert => (
+              <div key={alert.id} style={{ background: 'white', borderLeft: '5px solid #ea580c', borderRadius: '12px', padding: '1rem 1.2rem', boxShadow: '0 2px 5px rgba(0,0,0,0.04)' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '0.5rem', marginBottom: '0.8rem' }}>
+                  <div>
+                    <span style={{ fontSize: '1.1rem', fontWeight: 'bold', color: '#ea580c' }}>
+                      {alert.steps.toLocaleString()} Steps
+                    </span>
+                    <span style={{ marginLeft: '10px', fontSize: '0.75rem', padding: '3px 8px', borderRadius: '12px', background: alert.isSameStaff ? '#eff6ff' : '#fef2f2', color: alert.isSameStaff ? '#1d4ed8' : '#991b1b', fontWeight: 'bold' }}>
+                      {alert.isSameStaff ? '🔄 Same Staff Re-Upload' : '⚠️ Cross-Staff Duplicate'}
+                    </span>
+                  </div>
+                  <div style={{ fontSize: '0.8rem', color: '#64748b', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                    <Clock size={14} /> Gap: <b>{alert.daysDifference} days apart</b>
+                  </div>
+                </div>
+
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '1rem', background: '#f8fafc', padding: '0.8rem 1rem', borderRadius: '8px' }}>
+                  <div>
+                    <div style={{ fontSize: '0.75rem', fontWeight: 'bold', color: '#64748b', textTransform: 'uppercase', marginBottom: '2px' }}>First Uploaded Timestamp:</div>
+                    <div style={{ fontWeight: 600, color: '#1e293b' }}>{alert.firstUploaded.name} ({alert.firstUploaded.dept})</div>
+                    <div style={{ fontSize: '0.85rem', color: '#059669', fontWeight: 500 }}>📅 {alert.firstUploaded.timestampStr}</div>
+                  </div>
+                  <div>
+                    <div style={{ fontSize: '0.75rem', fontWeight: 'bold', color: '#64748b', textTransform: 'uppercase', marginBottom: '2px' }}>Last Uploaded Timestamp:</div>
+                    <div style={{ fontWeight: 600, color: '#1e293b' }}>{alert.lastUploaded.name} ({alert.lastUploaded.dept})</div>
+                    <div style={{ fontSize: '0.85rem', color: '#dc2626', fontWeight: 500 }}>📅 {alert.lastUploaded.timestampStr}</div>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </motion.div>
+      )}
 
       {filteredRecords.length > 0 && (
         <div className="admin-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: '1.5rem', marginBottom: '2rem' }}>
@@ -802,6 +928,9 @@ const AdminDashboard = () => {
             ) : (
               displayStaff.map(staff => {
                 const record = filteredRecords.find(r => r.staff_id === staff.id);
+                // Check if this record is part of a 90-day duplicate alert
+                const matchingAlert = record ? duplicateAlerts.find(a => a.steps === record.steps) : null;
+                
                 return (
                   <tr key={staff.id} style={{ borderBottom: '1px solid var(--glass-border)' }}>
                     <td style={{ padding: '1rem' }}>
@@ -810,7 +939,18 @@ const AdminDashboard = () => {
                     </td>
                     <td>{staff.dept}</td>
                     <td style={{ fontWeight: 'bold', color: (record?.steps >= 5000 || record?.reason) ? '#16a34a' : (record ? '#dc2626' : 'inherit') }}>
-                      {record ? record.steps : '---'}
+                      {record ? (
+                        <div>
+                          <span>{record.steps.toLocaleString()}</span>
+                          {matchingAlert && (
+                            <div style={{ marginTop: '2px' }}>
+                              <span style={{ background: '#fff7ed', color: '#c2410c', border: '1px solid #ffedd5', padding: '2px 6px', borderRadius: '10px', fontSize: '0.7rem', fontWeight: 'bold', display: 'inline-flex', alignItems: 'center', gap: '3px' }}>
+                                <AlertTriangle size={10} /> 90-Day Duplicate
+                              </span>
+                            </div>
+                          )}
+                        </div>
+                      ) : '---'}
                     </td>
                     <td>{record?.reason || '---'}</td>
                     <td>{record?.uploaded_time || record?.time || '---'}</td>
