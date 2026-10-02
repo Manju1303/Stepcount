@@ -25,3 +25,8 @@ dist-ssr
 .env
 .env.local
 .env.production
+
+# Datasets and scratch directories
+dataset/
+scratch/
+*.traineddata
