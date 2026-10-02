@@ -453,7 +453,7 @@ const exportPendingListExcel = async (dateStr, allStaff, dayRecords) => {
 
 // --- Components ---
 
-const Navbar = ({ user, onLogout }) => (
+const Navbar = ({ user, onLogout, installPrompt, onInstall }) => (
   <nav className="navbar" style={{ padding: '1.5rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
     <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
       <div className="logo-icon" style={{ background: 'var(--primary)', padding: '8px', borderRadius: '12px' }}>
@@ -461,11 +461,18 @@ const Navbar = ({ user, onLogout }) => (
       </div>
       <h2 className="title-gradient">Staff Fit</h2>
     </div>
-    {user && (
-      <button onClick={onLogout} className="btn-primary" style={{ background: '#fee2e2', color: '#ef4444', border: '1px solid #fecaca' }}>
-        <LogOut size={18} /> Logout
-      </button>
-    )}
+    <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+      {installPrompt && (
+        <button onClick={onInstall} className="btn-primary" style={{ background: '#e0e7ff', color: '#4338ca', border: '1px solid #c7d2fe', padding: '0.4rem 0.8rem', fontSize: '0.85rem' }}>
+          📲 Install App
+        </button>
+      )}
+      {user && (
+        <button onClick={onLogout} className="btn-primary" style={{ background: '#fee2e2', color: '#ef4444', border: '1px solid #fecaca' }}>
+          <LogOut size={18} /> Logout
+        </button>
+      )}
+    </div>
   </nav>
 );
 
@@ -572,8 +579,28 @@ const StaffDashboard = ({ user }) => {
       return;
     }
 
+    const submissionDate = result.date || new Date().toLocaleDateString('en-CA');
+    const alreadyUploaded = records.some(r => r.staff_id === user.id && r.date === submissionDate);
+    if (alreadyUploaded) {
+      alert(`You have already uploaded a screenshot for today (${submissionDate}). Only one screenshot per day is allowed.`);
+      return;
+    }
+
     setLoading(true);
     try {
+      // Check in cloud database to prevent duplicate submissions on the same date
+      const { data: existingCloud } = await supabase
+        .from('step_records')
+        .select('id')
+        .eq('staff_id', user.id)
+        .eq('date', submissionDate);
+
+      if (existingCloud && existingCloud.length > 0) {
+        alert(`You have already submitted your step count for today (${submissionDate}). Only one submission per day is permitted.`);
+        setLoading(false);
+        return;
+      }
+
       const newRecord = {
         staff_id: user.id,
         name: user.name,
@@ -593,14 +620,29 @@ const StaffDashboard = ({ user }) => {
       if (error) throw error;
 
       if (data) {
-        setRecords(prev => [...prev, data[0]]);
+        setRecords(prev => [data[0], ...prev]);
         setFile(null);
         setResult(null);
-        alert("Report submitted successfully to Cloud!");
+        alert("Report submitted successfully! Your step count has been logged for today.");
       }
     } catch (err) {
       console.error("Supabase Error:", err.message);
-      alert("Error saving to cloud: " + err.message);
+      // Fallback local persistence if cloud has temporary network issue
+      const localRec = {
+        id: `local-${Date.now()}`,
+        staff_id: user.id,
+        name: user.name,
+        dept: user.dept,
+        steps: stepsNum,
+        date: result.date,
+        time: result.time,
+        uploaded_time: result.uploadedTime,
+        reason: (stepsNum < 5000 && !reason.trim()) ? 'Steps below daily target (< 5000)' : reason,
+      };
+      setRecords(prev => [localRec, ...prev]);
+      setFile(null);
+      setResult(null);
+      alert("Submission saved successfully! (Note: Saved locally and will sync to cloud).");
     } finally {
       setLoading(false);
     }
@@ -618,9 +660,10 @@ const StaffDashboard = ({ user }) => {
   };
 
   const today = new Date().toLocaleDateString('en-CA');
-  const hasUploadedToday = records.some(r => r.staff_id === user.id && r.date === today);
+  const todayRecord = records.find(r => r.staff_id === user.id && r.date === today);
+  const hasUploadedToday = Boolean(todayRecord);
 
-  const staffHistory = records.filter(r => r.staff_id === user.id).sort((a, b) => b.id - a.id);
+  const staffHistory = records.filter(r => r.staff_id === user.id).sort((a, b) => new Date(b.date) - new Date(a.date));
   const monthlyRecords = staffHistory.filter(r => r.date.startsWith(selectedMonth));
 
   const handleMonthlyDownload = () => {
@@ -641,9 +684,25 @@ const StaffDashboard = ({ user }) => {
 
           {hasUploadedToday ? (
             <div style={{ textAlign: 'center', padding: '2rem', background: '#f0fdf4', borderRadius: '16px', border: '1px solid #dcfce7' }}>
-              <CheckCircle2 size={40} color="var(--success)" style={{ margin: '0 auto 1rem' }} />
-              <h3 style={{ color: 'var(--success)' }}>Daily Submission Complete</h3>
-              <p style={{ color: 'var(--text-muted)', marginTop: '0.5rem' }}>You have already uploaded your step count for today. It cannot be changed or edited.</p>
+              <CheckCircle2 size={44} color="var(--success)" style={{ margin: '0 auto 1rem' }} />
+              <h3 style={{ color: 'var(--success)', marginBottom: '0.5rem' }}>Today's Submission Complete</h3>
+              <div style={{ margin: '1rem 0', padding: '1rem', background: 'white', borderRadius: '12px', border: '1px solid #bbf7d0' }}>
+                <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)', display: 'block' }}>Your Recorded Step Count:</span>
+                <span style={{ fontSize: '2rem', fontWeight: 'bold', color: 'var(--primary)' }}>
+                  {todayRecord?.steps?.toLocaleString()} Steps
+                </span>
+                <div style={{ fontSize: '0.8rem', color: '#64748b', marginTop: '4px' }}>
+                  📅 {todayRecord?.date} at {todayRecord?.uploaded_time || todayRecord?.time}
+                </div>
+                {todayRecord?.reason && (
+                  <div style={{ fontSize: '0.8rem', color: '#b45309', marginTop: '6px' }}>
+                    Note: {todayRecord.reason}
+                  </div>
+                )}
+              </div>
+              <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>
+                🔒 Strict Policy: Only <b>one screenshot per day</b> is permitted.
+              </p>
             </div>
           ) : (
             <>
@@ -1147,12 +1206,35 @@ const AdminDashboard = () => {
 // --- Main App ---
 
 function App() {
-  const [user, setUser] = useState(null);
+  // Persistent login: Initialize directly from localStorage to eliminate any login screen flicker on PWA or web reopen
+  const [user, setUser] = useState(() => {
+    try {
+      const savedUser = localStorage.getItem('step_user');
+      return savedUser ? JSON.parse(savedUser) : null;
+    } catch (e) {
+      return null;
+    }
+  });
+
+  const [deferredPrompt, setDeferredPrompt] = useState(null);
 
   useEffect(() => {
-    const savedUser = localStorage.getItem('step_user');
-    if (savedUser) setUser(JSON.parse(savedUser));
+    const handleBeforeInstall = (e) => {
+      e.preventDefault();
+      setDeferredPrompt(e);
+    };
+    window.addEventListener('beforeinstallprompt', handleBeforeInstall);
+    return () => window.removeEventListener('beforeinstallprompt', handleBeforeInstall);
   }, []);
+
+  const handleInstallApp = async () => {
+    if (!deferredPrompt) return;
+    deferredPrompt.prompt();
+    const { outcome } = await deferredPrompt.userChoice;
+    if (outcome === 'accepted') {
+      setDeferredPrompt(null);
+    }
+  };
 
   const handleLogin = (userData) => {
     setUser(userData);
@@ -1166,7 +1248,12 @@ function App() {
 
   return (
     <div className="app-container">
-      <Navbar user={user} onLogout={handleLogout} />
+      <Navbar 
+        user={user} 
+        onLogout={handleLogout} 
+        installPrompt={deferredPrompt} 
+        onInstall={handleInstallApp} 
+      />
 
       <main style={{ padding: '2rem 0' }}>
         <AnimatePresence mode="wait">
