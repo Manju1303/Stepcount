@@ -158,6 +158,30 @@ describe('Step Count Extraction Logic', () => {
     const steps = extractSteps(tokens);
     expect(steps).toBe(3500);
   });
+
+  it('should correct OCR digit-letter confusions like so36 next to stes keyword', () => {
+    const ocrText = "daily report so36 stes 0.53 km";
+    const cleaned = cleanText(ocrText);
+    const tokens = tokenize(cleaned);
+    const steps = extractSteps(tokens);
+    expect(steps).toBe(5036);
+  });
+
+  it('should handle steps glued directly to digits without space like 5036steps', () => {
+    const ocrText = "active 5036steps today 45 cal";
+    const cleaned = cleanText(ocrText);
+    const tokens = tokenize(cleaned);
+    const steps = extractSteps(tokens);
+    expect(steps).toBe(5036);
+  });
+
+  it('should handle steps keyword with colon like steps:6250', () => {
+    const ocrText = "Steps:6250 Cal:240 Distance:4.2km";
+    const cleaned = cleanText(ocrText);
+    const tokens = tokenize(cleaned);
+    const steps = extractSteps(tokens);
+    expect(steps).toBe(6250);
+  });
 });
 
 describe('90-Day Duplicate Step Count Detection System', () => {

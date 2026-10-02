@@ -126,7 +126,20 @@ export const mockStaffMembers = [
   { id: "pd002", name: "Mr. A. Srinivasan", dept: "PD", password: "jkkmct" },
   { id: "pd003", name: "Mr. R. Velmurugan", dept: "PD", password: "jkkmct" },
   { id: "pd004", name: "Mr. S. Parivendhan", dept: "PD", password: "jkkmct" },
-  { id: "fm001", name: "Ms. Arthi", dept: "FM Radio", password: "jkkmct" }
+  { id: "fm001", name: "Ms. Arthi", dept: "FM Radio", password: "jkkmct" },
+  { id: "staff001", name: "Mr. N. Sakthivel", dept: "Admin", password: "jkkmct" },
+  { id: "ad007", name: "Mrs. K. Abirami", dept: "AI&DS", password: "jkkmct" },
+  { id: "cs005", name: "Mr. Vigneswara", dept: "Cyber Security", password: "jkkmct" },
+  { id: "s&h020", name: "Ms. R. Shanthi", dept: "S&H", password: "jkkmct" },
+  { id: "s&h021", name: "Ms. S. Sneka", dept: "S&H", password: "jkkmct" },
+  { id: "s&h022", name: "Mrs. P. Ranjitha", dept: "S&H", password: "jkkmct" },
+  { id: "s&h023", name: "Mrs. A. Neelaveni", dept: "S&H", password: "jkkmct" },
+  { id: "s&h024", name: "Mr. K. Manoj kumar", dept: "S&H", password: "jkkmct" },
+  { id: "s&h025", name: "Mrs. A. Gowsalya", dept: "S&H", password: "jkkmct" },
+  { id: "coe006", name: "Ms. K. Janani", dept: "COE", password: "jkkmct" },
+  { id: "ec005", name: "Mrs. V. Umamaheswari", dept: "Exam Cell", password: "jkkmct" },
+  { id: "ncc001", name: "Mr. Mohammad bilal", dept: "NCC", password: "jkkmct" },
+  { id: "idealab001", name: "Mr. Ragu", dept: "Idea Lab", password: "jkkmct" },
 ];
 
 export const ADMIN_CREDENTIALS = {

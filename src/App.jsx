@@ -24,6 +24,7 @@ import Tesseract from 'tesseract.js';
 import ExcelJS from 'exceljs';
 import { saveAs } from 'file-saver';
 import { mockStaffMembers, ADMIN_CREDENTIALS } from './data';
+import { pastRecords } from './pastRecords';
 import { supabase } from './supabaseClient';
 import { cleanText, tokenize, extractSteps, detect90DayDuplicates, findDuplicateAlertsInPeriod } from './extractionLogic';
 import logo from './assets/logo.png';
@@ -45,9 +46,9 @@ const preprocessImage = (imageSrc, shouldCrop = true) => {
       // Only crop if it's a full-length portrait screenshot and cropping is enabled
       // Otherwise (smartwatch, square, pre-cropped, or fallback), use the whole image
       const cropX = isFullPortrait ? img.width * 0.05 : 0;
-      const cropY = isFullPortrait ? img.height * 0.10 : 0;
+      const cropY = isFullPortrait ? img.height * 0.08 : 0;
       const cropWidth = isFullPortrait ? img.width * 0.90 : img.width;
-      const cropHeight = isFullPortrait ? img.height * 0.50 : img.height;
+      const cropHeight = isFullPortrait ? img.height * 0.75 : img.height;
 
       canvas.width = cropWidth * 2;
       canvas.height = cropHeight * 2;
@@ -70,21 +71,21 @@ const preprocessImage = (imageSrc, shouldCrop = true) => {
       }
       const avgBrightness = totalBrightness / (data.length / 4);
 
-      // Perform adaptive binarization
+      // Perform adaptive binarization - Tesseract requires dark text on white background
       if (avgBrightness > 127) {
         // Light background mode (e.g. phone white theme)
-        // Convert any colored/dark text (brightness < 200) to pure black, and everything else to white.
+        // Convert dark/colored text (brightness < 190) to pure black, and background to pure white.
         for (let i = 0; i < data.length; i += 4) {
           const avg = data[i] * 0.299 + data[i + 1] * 0.587 + data[i + 2] * 0.114;
-          const finalVal = avg < 200 ? 0 : 255;
+          const finalVal = avg < 190 ? 0 : 255;
           data[i] = data[i + 1] = data[i + 2] = finalVal;
         }
       } else {
-        // Dark background mode (e.g. smartwatch dark theme)
-        // Convert any colored/light text (brightness > 55) to pure white, and everything else to black.
+        // Dark background mode (e.g. smartwatch / AMOLED dark theme)
+        // Invert to black text on clean white background so Tesseract recognizes numbers cleanly!
         for (let i = 0; i < data.length; i += 4) {
           const avg = data[i] * 0.299 + data[i + 1] * 0.587 + data[i + 2] * 0.114;
-          const finalVal = avg > 55 ? 255 : 0;
+          const finalVal = avg > 65 ? 0 : 255;
           data[i] = data[i + 1] = data[i + 2] = finalVal;
         }
       }
@@ -302,17 +303,151 @@ const exportToExcelFull = async (records, title = 'Staff Step Count Report', sta
     worksheet.addRow(['TOTAL STAFF', ':', total]).font = { name: 'Times New Roman', bold: true };
     worksheet.addRow(['PRESENT', ':', present]).font = { name: 'Times New Roman', bold: true };
     worksheet.addRow(['ABSENT', ':', absent]).font = { name: 'Times New Roman', bold: true };
-    worksheet.addRow(['PENDING', ':', 'NIL']).font = { name: 'Times New Roman', bold: true };
+    worksheet.addRow(['PENDING', ':', absent]).font = { name: 'Times New Roman', bold: true, color: { argb: 'FFDC2626' } };
 
     worksheet.addRow([]);
     worksheet.addRow([]);
     const sig = worksheet.addRow(['', '', '', '', 'PRINCIPAL SIGNATURE']);
     sig.getCell(5).font = { name: 'Times New Roman', bold: true };
     worksheet.addRow(['', '', '', '', '____________________']);
+
+    // Dedicated Pending Staff worksheet in the same workbook
+    const pendingSheet = workbook.addWorksheet('Pending Staff');
+    pendingSheet.getColumn(1).width = 8;
+    pendingSheet.getColumn(2).width = 18;
+    pendingSheet.getColumn(3).width = 40;
+    pendingSheet.getColumn(4).width = 25;
+    pendingSheet.getColumn(5).width = 22;
+
+    const pTitle = pendingSheet.addRow([`PENDING / NOT SUBMITTED SCREENSHOT LIST - ${reportDateStr}`]);
+    pendingSheet.mergeCells('A1:E1');
+    pTitle.font = { name: 'Times New Roman', bold: true, size: 13, color: { argb: 'FF991B1B' } };
+    pTitle.alignment = { horizontal: 'center' };
+    pTitle.height = 30;
+
+    const pHeader = pendingSheet.addRow(['S.NO', 'STAFF ID', 'NAME AND DESIGNATION', 'DEPARTMENT', 'STATUS']);
+    pHeader.eachCell(c => {
+      c.font = { name: 'Times New Roman', bold: true, size: 11, color: { argb: 'FFFFFFFF' } };
+      c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF991B1B' } };
+      c.border = { top: { style: 'thin' }, left: { style: 'thin' }, bottom: { style: 'thin' }, right: { style: 'thin' } };
+      c.alignment = { horizontal: 'center', vertical: 'middle' };
+    });
+    pHeader.height = 28;
+
+    let pSNo = 1;
+    const allStaffList = allExpectedStaff || mockStaffMembers;
+    allStaffList.forEach(staff => {
+      const rec = records.find(r => r.staff_id === staff.id);
+      if (!rec) {
+        const row = pendingSheet.addRow([pSNo++, staff.id, `${staff.name} - ${staff.dept}`, staff.dept, 'NOT SUBMITTED']);
+        row.eachCell(c => {
+          c.font = { name: 'Times New Roman', size: 11 };
+          c.border = { top: { style: 'thin' }, left: { style: 'thin' }, bottom: { style: 'thin' }, right: { style: 'thin' } };
+          c.alignment = { horizontal: 'left', vertical: 'middle', indent: 1 };
+        });
+        row.getCell(1).alignment = { horizontal: 'center' };
+        row.getCell(2).alignment = { horizontal: 'center' };
+        row.getCell(5).alignment = { horizontal: 'center' };
+        row.getCell(5).font = { name: 'Times New Roman', size: 11, bold: true, color: { argb: 'FFDC2626' } };
+        row.height = 22;
+      }
+    });
   }
 
   const buffer = await workbook.xlsx.writeBuffer();
   saveAs(new Blob([buffer]), `${title.replace(/\s+/g, '_')}.xlsx`);
+};
+
+const exportPendingListExcel = async (dateStr, allStaff, dayRecords) => {
+  const workbook = new ExcelJS.Workbook();
+  const worksheet = workbook.addWorksheet('Pending List');
+
+  worksheet.pageSetup.paperSize = 9; // A4
+  worksheet.pageSetup.orientation = 'portrait';
+  worksheet.pageSetup.fitToPage = true;
+  worksheet.pageSetup.fitToWidth = 1;
+  worksheet.pageSetup.fitToHeight = 0;
+  worksheet.pageSetup.margins = { left: 0.3, right: 0.3, top: 0.5, bottom: 0.5, header: 0.3, footer: 0.3 };
+
+  worksheet.getRow(1).height = 110;
+  worksheet.mergeCells('A1:E1');
+  try {
+    const headerResp = await fetch(header);
+    const headerBuf = await headerResp.arrayBuffer();
+    const headerId = workbook.addImage({ buffer: headerBuf, extension: 'png' });
+    worksheet.addImage(headerId, { tl: { col: 0, row: 0 }, ext: { width: 550, height: 110 } });
+  } catch (e) {
+    console.error("Header load failed", e);
+  }
+
+  const dayName = new Date(dateStr).toLocaleDateString('en-US', { weekday: 'long' }).toUpperCase();
+  const subTitles = [
+    "FACULTY WELFARE CLUB",
+    "FITNESS ACTIVITY ATTENDANCE - 2026",
+    `PENDING / NOT SUBMITTED SCREENSHOT LIST - ${dateStr} (${dayName})`
+  ];
+
+  subTitles.forEach((st, i) => {
+    const rowNum = i + 2;
+    worksheet.mergeCells(`A${rowNum}:E${rowNum}`);
+    const cell = worksheet.getCell(`A${rowNum}`);
+    cell.value = st;
+    cell.font = { name: 'Times New Roman', size: 12, bold: true, color: { argb: i === 2 ? 'FF991B1B' : 'FF000000' } };
+    cell.alignment = { horizontal: 'center' };
+    worksheet.getRow(rowNum).height = 20;
+  });
+
+  worksheet.getColumn(1).width = 8;   // S.NO
+  worksheet.getColumn(2).width = 16;  // STAFF ID
+  worksheet.getColumn(3).width = 40;  // NAME AND DESIGNATION
+  worksheet.getColumn(4).width = 25;  // DEPARTMENT
+  worksheet.getColumn(5).width = 25;  // STATUS
+
+  const headerRow = worksheet.getRow(6);
+  headerRow.values = ['S.NO', 'STAFF ID', 'STAFF NAME', 'DEPARTMENT', 'SUBMISSION STATUS'];
+  headerRow.eachCell(c => {
+    c.font = { name: 'Times New Roman', bold: true, size: 11, color: { argb: 'FFFFFFFF' } };
+    c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF991B1B' } };
+    c.border = { top: { style: 'thin' }, left: { style: 'thin' }, bottom: { style: 'thin' }, right: { style: 'thin' } };
+    c.alignment = { horizontal: 'center', vertical: 'middle' };
+  });
+  headerRow.height = 30;
+
+  const staffList = allStaff || mockStaffMembers;
+  const submittedIds = new Set(dayRecords.filter(r => r.date === dateStr && r.steps).map(r => r.staff_id));
+  const pendingStaff = staffList.filter(s => !submittedIds.has(s.id));
+
+  let curY = 7;
+  pendingStaff.forEach((s, idx) => {
+    const row = worksheet.addRow([idx + 1, s.id, `${s.name} - ${s.dept}`, s.dept, 'NOT SUBMITTED']);
+    row.eachCell(c => {
+      c.font = { name: 'Times New Roman', size: 11 };
+      c.border = { top: { style: 'thin' }, left: { style: 'thin' }, bottom: { style: 'thin' }, right: { style: 'thin' } };
+      c.alignment = { horizontal: 'left', vertical: 'middle', indent: 1 };
+    });
+    row.getCell(1).alignment = { horizontal: 'center' };
+    row.getCell(2).alignment = { horizontal: 'center' };
+    row.getCell(5).alignment = { horizontal: 'center' };
+    row.getCell(5).font = { name: 'Times New Roman', size: 11, bold: true, color: { argb: 'FFDC2626' } };
+    row.height = 22;
+  });
+
+  worksheet.addRow([]);
+  const sum1 = worksheet.addRow(['ATTENDANCE SUMMARY']);
+  worksheet.mergeCells(`A${sum1.number}:B${sum1.number}`);
+  sum1.font = { name: 'Times New Roman', bold: true, underline: true, size: 12 };
+  worksheet.addRow(['TOTAL STAFF', ':', staffList.length]).font = { name: 'Times New Roman', bold: true };
+  worksheet.addRow(['SUBMITTED', ':', submittedIds.size]).font = { name: 'Times New Roman', bold: true };
+  worksheet.addRow(['PENDING', ':', pendingStaff.length]).font = { name: 'Times New Roman', bold: true, color: { argb: 'FFDC2626' } };
+
+  worksheet.addRow([]);
+  worksheet.addRow([]);
+  const sig = worksheet.addRow(['', '', '', '', 'PRINCIPAL SIGNATURE']);
+  sig.getCell(5).font = { name: 'Times New Roman', bold: true };
+  worksheet.addRow(['', '', '', '', '____________________']);
+
+  const buffer = await workbook.xlsx.writeBuffer();
+  saveAs(new Blob([buffer]), `Pending_Staff_Report_${dateStr}.xlsx`);
 };
 
 
@@ -396,10 +531,16 @@ const StaffDashboard = ({ user }) => {
           .from('step_records')
           .select('*')
           .eq('staff_id', user.id);
-        if (error) throw error;
-        setRecords(data || []);
+        
+        const staffPast = pastRecords.filter(r => r.staff_id === user.id);
+        const recordMap = new Map();
+        staffPast.forEach(r => recordMap.set(r.date, r));
+        (data || []).forEach(r => recordMap.set(r.date, r));
+        setRecords(Array.from(recordMap.values()).sort((a,b) => new Date(b.date) - new Date(a.date)));
       } catch (err) {
-        console.error("Staff fetch error:", err);
+        console.warn("Staff fetch fallback to past records:", err);
+        const staffPast = pastRecords.filter(r => r.staff_id === user.id);
+        setRecords(staffPast.sort((a,b) => new Date(b.date) - new Date(a.date)));
       } finally {
         setLoadingRecords(false);
       }
@@ -631,7 +772,10 @@ const AdminDashboard = () => {
   const [all90DayRecords, setAll90DayRecords] = useState([]);
   const [duplicateAlerts, setDuplicateAlerts] = useState([]);
   const [loadingRecords, setLoadingRecords] = useState(false);
-  const [selectedDate, setSelectedDate] = useState(new Date().toLocaleDateString('en-CA'));
+  const latestPastDate = pastRecords && pastRecords.length > 0
+    ? pastRecords[pastRecords.length - 1].date
+    : new Date().toLocaleDateString('en-CA');
+  const [selectedDate, setSelectedDate] = useState(latestPastDate);
   const [filterDept, setFilterDept] = useState('All');
   const [sortOrder, setSortOrder] = useState('time');
 
@@ -649,9 +793,11 @@ const AdminDashboard = () => {
           .select('*')
           .gte('date', cutoffStr);
           
-        if (error) throw error;
-        
-        const allFetched = data || [];
+        // Combine past records with any cloud records
+        const recordMap = new Map();
+        pastRecords.forEach(r => recordMap.set(`${r.date}_${r.staff_id}`, r));
+        (data || []).forEach(r => recordMap.set(`${r.date}_${r.staff_id}`, r));
+        const allFetched = Array.from(recordMap.values());
         setAll90DayRecords(allFetched);
 
         // Detect 90-day duplicate screenshot / step count alerts across all staff
@@ -661,7 +807,13 @@ const AdminDashboard = () => {
         // Filter records for current selected date view
         setRecords(allFetched.filter(r => r.date === selectedDate));
       } catch (err) {
-        console.error("Admin fetch error:", err);
+        console.warn("Admin fetch fallback to past records:", err);
+        const recordMap = new Map();
+        pastRecords.forEach(r => recordMap.set(`${r.date}_${r.staff_id}`, r));
+        const allFetched = Array.from(recordMap.values());
+        setAll90DayRecords(allFetched);
+        setDuplicateAlerts(findDuplicateAlertsInPeriod(allFetched, 90));
+        setRecords(allFetched.filter(r => r.date === selectedDate));
       } finally {
         setLoadingRecords(false);
       }
@@ -893,6 +1045,14 @@ const AdminDashboard = () => {
               className="btn-primary" style={{ padding: '0.5rem 1rem', height: '38px' }}
             >
               <FileSpreadsheet size={18} /> Export Filtered
+            </button>
+
+            <button
+              onClick={() => exportPendingListExcel(selectedDate, mockStaffMembers, records)}
+              className="btn-primary" style={{ padding: '0.5rem 1rem', height: '38px', background: '#dc2626', color: 'white', border: '1px solid #b91c1c' }}
+              title="Download Excel list of staff who have not submitted screenshot"
+            >
+              <AlertCircle size={18} /> Export Pending List
             </button>
           </div>
         </div>

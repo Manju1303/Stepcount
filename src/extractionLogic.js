@@ -33,6 +33,10 @@ export const getLevenshteinDistance = (a, b) => {
 export const cleanText = (text) => {
   let cleaned = text.toLowerCase();
 
+  // Separate numbers and steps keyword when glued together without space (e.g., "5036steps" -> "5036 steps")
+  cleaned = cleaned.replace(/(\d+)\s*(steps|step|stes|staps|stps|stpes|sleps)/gi, '$1 $2');
+  cleaned = cleaned.replace(/(steps|step|stes|staps|stps|stpes|sleps)\s*[:=]?\s*(\d+)/gi, '$1 $2');
+
   // Handle smartwatch goal slashes like "3500/10000" -> "3500 / 10000"
   cleaned = cleaned.replace(/(\d+)\s*\/\s*(\d+)/g, '$1 / $2');
   
@@ -49,12 +53,24 @@ export const cleanText = (text) => {
   return cleaned;
 };
 
+// Map common OCR letter misreadings in numeric contexts
+const fixOcrDigits = (str) => {
+  return str
+    .replace(/[oO]/g, '0')
+    .replace(/[lIi]/g, '1')
+    .replace(/[zZ]/g, '2')
+    .replace(/[sS]/g, '5')
+    .replace(/[bB]/g, '6')
+    .replace(/[gq]/g, '9');
+};
+
 export const tokenize = (text) => {
   const rawTokens = text.split(/\s+/).filter(t => t.trim() !== '');
   let tokens = [];
   for (let i = 0; i < rawTokens.length; i++) {
-    const t = rawTokens[i];
+    let t = rawTokens[i];
 
+    // Filter out calendar years
     if (/^(2023|2024|2025|2026)$/.test(t)) {
       continue;
     }
@@ -67,13 +83,25 @@ export const tokenize = (text) => {
       continue;
     }
 
+    // Correct digit-letter confusion if token looks like a step count (e.g. "so36", "5o31", "s031")
+    if (/^[0-9oOlIiZzSsBb]{3,6}$/.test(t) && /\d/.test(t)) {
+      t = fixOcrDigits(t);
+    } else if (/^[sS][oO]\d{2,4}$/.test(t)) {
+      // e.g. "so36" -> "5036"
+      t = fixOcrDigits(t);
+    }
+
     tokens.push(t);
   }
   return tokens;
 };
 
 const UNITS = ['cal', 'kcal', 'calories', 'mi', 'miles', 'km', 'kilometers', 'min', 'mins', 'minutes', 'bpm', 'kg', 'lbs', 'move'];
-const STEPS_KEYWORDS = ['steps', 'step', 'staps', 'stept', 'sleps', 'stepe', 'stps', 'slps', 'stept', 'stesp', 'sreps', 'siers', 's1eps'];
+const STEPS_KEYWORDS = [
+  'steps', 'step', 'staps', 'stept', 'sleps', 'stepe', 'stps', 'slps',
+  'stesp', 'sreps', 'siers', 's1eps', 'stes', 'stecs', 'steos', 'stees',
+  'steds', 'stpes', 'stepcount', 'dailysteps', 'totalsteps'
+];
 
 export const isStepsKeyword = (word) => {
   const cleanWord = word.toLowerCase().replace(/[^a-z0-9]/g, '');
@@ -86,7 +114,7 @@ export const isStepsKeyword = (word) => {
   if (cleanWord.length >= 4 && cleanWord.length <= 6) {
     const distToSteps = getLevenshteinDistance(cleanWord, 'steps');
     if (distToSteps <= 2) {
-      const exclusions = ['sleep', 'stops', 'stop', 'steep', 'stems', 'stars', 'strip', 'state'];
+      const exclusions = ['sleep', 'stops', 'stop', 'steep', 'stems', 'stars', 'strip', 'state', 'speed'];
       if (!exclusions.includes(cleanWord)) {
         return true;
       }
@@ -97,7 +125,7 @@ export const isStepsKeyword = (word) => {
   if (cleanWord.length === 3 || cleanWord.length === 4) {
     const distToStep = getLevenshteinDistance(cleanWord, 'step');
     if (distToStep <= 1) {
-      const exclusions = ['stop', 'shop', 'ship', 'stem', 'site'];
+      const exclusions = ['stop', 'shop', 'ship', 'stem', 'site', 'star'];
       if (!exclusions.includes(cleanWord)) {
         return true;
       }
