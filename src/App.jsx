@@ -903,15 +903,13 @@ const AdminDashboard = () => {
 
   const departments = ['All', ...new Set(mockStaffMembers.map(s => s.dept))];
 
-  // Set of all staff IDs that have uploaded a repeated step count in the 90-day window
-  const duplicateStaffIds = new Set(
-    duplicateAlerts.flatMap(a => (a.uploaderStaffIds || a.allMatchedRecords?.map(m => m.staffId) || []))
-  );
+  // Set of staff IDs that have uploaded repeated step counts in the 90-day window (same staff repeats)
+  const duplicateStaffIds = new Set(duplicateAlerts.map(a => a.staffId || a.staff_id));
 
   // Set of staff IDs that have a repeated step count specifically on the currently selected date
   const selectedDateDuplicateStaffIds = new Set(
     filteredRecords
-      .filter(r => duplicateAlerts.some(a => a.steps === r.steps && (a.uploaderStaffIds || []).includes(r.staff_id)))
+      .filter(r => duplicateAlerts.some(a => a.steps === r.steps && (a.staffId === r.staff_id || a.staff_id === r.staff_id)))
       .map(r => r.staff_id)
   );
 
@@ -1052,63 +1050,63 @@ const AdminDashboard = () => {
           </div>
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-            {duplicateAlerts.map(alert => {
-              const uploaderIds = alert.uploaderStaffIds || [...new Set(alert.allMatchedRecords?.map(m => m.staffId) || [])];
-              return (
-                <div key={alert.id} style={{ background: 'white', borderLeft: '5px solid #ea580c', borderRadius: '12px', padding: '1rem 1.2rem', boxShadow: '0 2px 5px rgba(0,0,0,0.04)' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '0.5rem', marginBottom: '0.8rem' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '8px' }}>
-                      <span style={{ fontSize: '1.15rem', fontWeight: 'bold', color: '#ea580c' }}>
-                        {alert.steps.toLocaleString()} Steps
-                      </span>
-                      <span style={{ fontSize: '0.75rem', padding: '3px 8px', borderRadius: '12px', background: alert.isSameStaff ? '#eff6ff' : '#fef2f2', color: alert.isSameStaff ? '#1d4ed8' : '#991b1b', fontWeight: 'bold' }}>
-                        {alert.isSameStaff ? '🔄 Same Staff Re-Upload' : '⚠️ Cross-Staff Duplicate'}
-                      </span>
-                      <span style={{ fontSize: '0.8rem', padding: '3px 10px', borderRadius: '8px', background: '#fef3c7', color: '#92400e', border: '1px solid #fde68a', fontWeight: 'bold', display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
-                        <User size={13} /> Person ID(s): <b style={{ fontFamily: 'monospace' }}>{uploaderIds.join(', ')}</b>
-                      </span>
-                    </div>
-                    <div style={{ fontSize: '0.8rem', color: '#64748b', display: 'flex', alignItems: 'center', gap: '4px' }}>
-                      <Clock size={14} /> Gap: <b>{alert.daysDifference} days apart</b>
-                    </div>
+            {duplicateAlerts.map(alert => (
+              <div key={alert.id} style={{ background: 'white', borderLeft: '5px solid #ea580c', borderRadius: '12px', padding: '1rem 1.2rem', boxShadow: '0 2px 5px rgba(0,0,0,0.04)' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '0.5rem', marginBottom: '0.8rem' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '8px' }}>
+                    <span style={{ fontSize: '1.15rem', fontWeight: 'bold', color: '#ea580c' }}>
+                      {alert.steps.toLocaleString()} Steps
+                    </span>
+                    <span style={{ fontSize: '0.75rem', padding: '3px 8px', borderRadius: '12px', background: '#eff6ff', color: '#1d4ed8', fontWeight: 'bold' }}>
+                      🔄 Same Staff Re-Upload
+                    </span>
+                    <span style={{ fontSize: '0.8rem', padding: '3px 10px', borderRadius: '8px', background: '#fef3c7', color: '#92400e', border: '1px solid #fde68a', fontWeight: 'bold', display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                      <User size={13} /> Person ID: <b style={{ fontFamily: 'monospace' }}>{alert.staffId}</b>
+                    </span>
+                    <span style={{ fontSize: '0.85rem', color: '#1e293b', fontWeight: 600 }}>
+                      {alert.name} ({alert.dept})
+                    </span>
                   </div>
-
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '1rem', background: '#f8fafc', padding: '0.8rem 1rem', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
-                    <div>
-                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '4px' }}>
-                        <span style={{ fontSize: '0.72rem', fontWeight: 'bold', color: '#64748b', textTransform: 'uppercase' }}>First Uploaded:</span>
-                        <span style={{ background: '#dbeafe', color: '#1e40af', border: '1px solid #bfdbfe', padding: '1px 8px', borderRadius: '6px', fontSize: '0.75rem', fontWeight: 'bold', fontFamily: 'monospace' }}>
-                          Person ID: {alert.firstUploaded.staffId}
-                        </span>
-                      </div>
-                      <div style={{ fontWeight: 600, color: '#1e293b' }}>{alert.firstUploaded.name} ({alert.firstUploaded.dept})</div>
-                      <div style={{ fontSize: '0.85rem', color: '#059669', fontWeight: 500, marginTop: '3px' }}>📅 {alert.firstUploaded.timestampStr}</div>
-                    </div>
-                    <div>
-                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '4px' }}>
-                        <span style={{ fontSize: '0.72rem', fontWeight: 'bold', color: '#64748b', textTransform: 'uppercase' }}>Repeated / Last Upload:</span>
-                        <span style={{ background: '#fee2e2', color: '#991b1b', border: '1px solid #fecaca', padding: '1px 8px', borderRadius: '6px', fontSize: '0.75rem', fontWeight: 'bold', fontFamily: 'monospace' }}>
-                          Person ID: {alert.lastUploaded.staffId}
-                        </span>
-                      </div>
-                      <div style={{ fontWeight: 600, color: '#1e293b' }}>{alert.lastUploaded.name} ({alert.lastUploaded.dept})</div>
-                      <div style={{ fontSize: '0.85rem', color: '#dc2626', fontWeight: 500, marginTop: '3px' }}>📅 {alert.lastUploaded.timestampStr}</div>
-                    </div>
+                  <div style={{ fontSize: '0.8rem', color: '#64748b', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                    <Clock size={14} /> Gap: <b>{alert.daysDifference} days apart</b>
                   </div>
-
-                  {alert.allMatchedRecords && alert.allMatchedRecords.length > 0 && (
-                    <div style={{ marginTop: '0.75rem', paddingTop: '0.5rem', borderTop: '1px dashed #e2e8f0', display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '6px', fontSize: '0.78rem' }}>
-                      <span style={{ color: '#64748b', fontWeight: 600 }}>All Uploaders for this value:</span>
-                      {alert.allMatchedRecords.map((m, idx) => (
-                        <span key={idx} style={{ background: '#f1f5f9', color: '#1e293b', border: '1px solid #cbd5e1', padding: '2px 8px', borderRadius: '6px', fontWeight: 500 }}>
-                          Person ID: <b style={{ color: '#ea580c', fontFamily: 'monospace' }}>{m.staffId}</b> ({m.name} • {m.date})
-                        </span>
-                      ))}
-                    </div>
-                  )}
                 </div>
-              );
-            })}
+
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '1rem', background: '#f8fafc', padding: '0.8rem 1rem', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
+                  <div>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '4px' }}>
+                      <span style={{ fontSize: '0.72rem', fontWeight: 'bold', color: '#64748b', textTransform: 'uppercase' }}>First Submission:</span>
+                      <span style={{ background: '#dbeafe', color: '#1e40af', border: '1px solid #bfdbfe', padding: '1px 8px', borderRadius: '6px', fontSize: '0.75rem', fontWeight: 'bold', fontFamily: 'monospace' }}>
+                        Person ID: {alert.staffId}
+                      </span>
+                    </div>
+                    <div style={{ fontWeight: 600, color: '#1e293b' }}>{alert.firstUploaded.name} ({alert.firstUploaded.dept})</div>
+                    <div style={{ fontSize: '0.85rem', color: '#059669', fontWeight: 500, marginTop: '3px' }}>📅 {alert.firstUploaded.timestampStr}</div>
+                  </div>
+                  <div>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '4px' }}>
+                      <span style={{ fontSize: '0.72rem', fontWeight: 'bold', color: '#64748b', textTransform: 'uppercase' }}>Repeated Submission:</span>
+                      <span style={{ background: '#fee2e2', color: '#991b1b', border: '1px solid #fecaca', padding: '1px 8px', borderRadius: '6px', fontSize: '0.75rem', fontWeight: 'bold', fontFamily: 'monospace' }}>
+                        Person ID: {alert.staffId}
+                      </span>
+                    </div>
+                    <div style={{ fontWeight: 600, color: '#1e293b' }}>{alert.lastUploaded.name} ({alert.lastUploaded.dept})</div>
+                    <div style={{ fontSize: '0.85rem', color: '#dc2626', fontWeight: 500, marginTop: '3px' }}>📅 {alert.lastUploaded.timestampStr}</div>
+                  </div>
+                </div>
+
+                {alert.allMatchedRecords && alert.allMatchedRecords.length > 2 && (
+                  <div style={{ marginTop: '0.75rem', paddingTop: '0.5rem', borderTop: '1px dashed #e2e8f0', display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '6px', fontSize: '0.78rem' }}>
+                    <span style={{ color: '#64748b', fontWeight: 600 }}>All upload dates for Person ID <b>{alert.staffId}</b> with this value:</span>
+                    {alert.allMatchedRecords.map((m, idx) => (
+                      <span key={idx} style={{ background: '#f1f5f9', color: '#1e293b', border: '1px solid #cbd5e1', padding: '2px 8px', borderRadius: '6px', fontWeight: 500 }}>
+                        {m.date} ({m.time})
+                      </span>
+                    ))}
+                  </div>
+                )}
+              </div>
+            ))}
           </div>
         </motion.div>
       )}
@@ -1282,9 +1280,9 @@ const AdminDashboard = () => {
             ) : (
               displayStaff.map(staff => {
                 const record = filteredRecords.find(r => r.staff_id === staff.id);
-                // Check if this record is part of a 90-day duplicate alert AND uploaded by this staff member
+                // Check if this record is a repeated step count by the SAME staff member
                 const matchingAlert = record 
-                  ? duplicateAlerts.find(a => a.steps === record.steps && (a.uploaderStaffIds ? a.uploaderStaffIds.includes(staff.id) : a.allMatchedRecords?.some(m => m.staffId === staff.id))) 
+                  ? duplicateAlerts.find(a => a.steps === record.steps && (a.staffId === staff.id || a.staff_id === staff.id)) 
                   : null;
                 
                 return (
@@ -1330,16 +1328,14 @@ const AdminDashboard = () => {
                               }}>
                                 <div style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', color: '#c2410c', fontSize: '0.72rem', fontWeight: 'bold' }}>
                                   <AlertTriangle size={12} color="#ea580c" />
-                                  <span>Repeated Value</span>
+                                  <span>Repeated Value (Same Staff)</span>
                                 </div>
                                 <div style={{ fontSize: '0.72rem', color: '#9a3412', fontWeight: 600 }}>
-                                  Uploader Person ID: <span style={{ fontFamily: 'monospace', background: '#ffedd5', color: '#7c2d12', padding: '1px 6px', borderRadius: '4px', fontWeight: 'bold', border: '1px solid #fed7aa' }}>{staff.id}</span>
+                                  Person ID: <span style={{ fontFamily: 'monospace', background: '#ffedd5', color: '#7c2d12', padding: '1px 6px', borderRadius: '4px', fontWeight: 'bold', border: '1px solid #fed7aa' }}>{staff.id}</span>
                                 </div>
-                                {matchingAlert.uploaderStaffIds && matchingAlert.uploaderStaffIds.filter(id => id !== staff.id).length > 0 && (
-                                  <div style={{ fontSize: '0.68rem', color: '#64748b' }}>
-                                    Also uploaded by Person ID(s): {matchingAlert.uploaderStaffIds.filter(id => id !== staff.id).join(', ')}
-                                  </div>
-                                )}
+                                <div style={{ fontSize: '0.68rem', color: '#64748b' }}>
+                                  Previously submitted on {matchingAlert.firstUploaded.date} ({matchingAlert.daysDifference} days apart)
+                                </div>
                               </div>
                             </div>
                           )}

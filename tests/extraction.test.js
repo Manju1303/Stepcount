@@ -191,12 +191,27 @@ describe('90-Day Duplicate Step Count Detection System', () => {
     { id: 3, staff_id: 'cse002', name: 'Mr. E. Ananth', dept: 'CSE', steps: 6200, date: '2026-06-01', uploaded_time: '08:00 AM' }
   ];
 
-  it('should detect duplicate step count submitted within 90 days by another staff member', () => {
+  it('should NOT consider matching step count as duplicate if submitted by a different staff member', () => {
     const newSubmission = {
       staff_id: 'ece001',
       name: 'Mr. A. Vigneshkumar',
       dept: 'ECE',
-      steps: 8520,
+      steps: 8520, // Same steps as cse001, but DIFFERENT staff member
+      date: '2026-08-28',
+      uploaded_time: '11:00 AM'
+    };
+
+    const result = detect90DayDuplicates(newSubmission, existingRecords, 90);
+    expect(result.isDuplicate).toBe(false);
+    expect(result.matches.length).toBe(0);
+  });
+
+  it('should consider repeated step count as duplicate when submitted by the SAME staff member', () => {
+    const newSubmission = {
+      staff_id: 'cse001',
+      name: 'Dr. N. Sathyabalaji',
+      dept: 'CSE',
+      steps: 8520, // Exact same steps as cse001 previously uploaded on 2026-08-01
       date: '2026-08-28',
       uploaded_time: '11:00 AM'
     };
@@ -204,16 +219,17 @@ describe('90-Day Duplicate Step Count Detection System', () => {
     const result = detect90DayDuplicates(newSubmission, existingRecords, 90);
     expect(result.isDuplicate).toBe(true);
     expect(result.matches.length).toBe(1);
+    expect(result.matches[0].staffId).toBe('cse001');
     expect(result.matches[0].name).toBe('Dr. N. Sathyabalaji');
     expect(result.matches[0].steps).toBe(8520);
   });
 
   it('should ignore matching step counts outside the 90-day window', () => {
     const newSubmission = {
-      staff_id: 'ece002',
-      name: 'Mrs. U. Sasikala',
-      dept: 'ECE',
-      steps: 6200, // Matches record #3 from 2026-06-01 (~88 days ago if now is Aug 28, but let's test 100 days)
+      staff_id: 'cse002',
+      name: 'Mr. E. Ananth',
+      dept: 'CSE',
+      steps: 6200, // Matches cse002 record from 2026-06-01, but over 90 days away
       date: '2026-09-20',
       uploaded_time: '02:00 PM'
     };
@@ -222,14 +238,16 @@ describe('90-Day Duplicate Step Count Detection System', () => {
     expect(result.isDuplicate).toBe(false);
   });
 
-  it('should generate admin duplicate alerts with first and last uploaded timestamps', () => {
+  it('should generate admin duplicate alerts only for the same staff repeating their step count', () => {
     const allRecords = [
       ...existingRecords,
-      { id: 4, staff_id: 'cse001', name: 'Dr. N. Sathyabalaji', dept: 'CSE', steps: 8520, date: '2026-08-28', uploaded_time: '11:30 AM' }
+      { id: 4, staff_id: 'cse001', name: 'Dr. N. Sathyabalaji', dept: 'CSE', steps: 8520, date: '2026-08-28', uploaded_time: '11:30 AM' },
+      { id: 5, staff_id: 'ece001', name: 'Mr. A. Vigneshkumar', dept: 'ECE', steps: 8520, date: '2026-08-29', uploaded_time: '12:00 PM' } // Different staff with 8520 should NOT trigger duplicate
     ];
 
     const alerts = findDuplicateAlertsInPeriod(allRecords, 90);
     expect(alerts.length).toBe(1);
+    expect(alerts[0].staffId).toBe('cse001');
     expect(alerts[0].steps).toBe(8520);
     expect(alerts[0].isSameStaff).toBe(true);
     expect(alerts[0].uploaderStaffIds).toEqual(['cse001']);
