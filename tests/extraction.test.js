@@ -232,9 +232,12 @@ describe('90-Day Duplicate Step Count Detection System', () => {
     expect(alerts.length).toBe(1);
     expect(alerts[0].steps).toBe(8520);
     expect(alerts[0].isSameStaff).toBe(true);
+    expect(alerts[0].uploaderStaffIds).toEqual(['cse001']);
+    expect(alerts[0].firstUploaded.staffId).toBe('cse001');
     expect(alerts[0].firstUploaded.name).toBe('Dr. N. Sathyabalaji');
     expect(alerts[0].firstUploaded.date).toBe('2026-08-01');
     expect(alerts[0].firstUploaded.timestampStr).toBe('2026-08-01 at 09:30 AM');
+    expect(alerts[0].lastUploaded.staffId).toBe('cse001');
     expect(alerts[0].lastUploaded.name).toBe('Dr. N. Sathyabalaji');
     expect(alerts[0].lastUploaded.date).toBe('2026-08-28');
     expect(alerts[0].lastUploaded.timestampStr).toBe('2026-08-28 at 11:30 AM');

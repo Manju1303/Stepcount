@@ -258,7 +258,8 @@ export const detect90DayDuplicates = (newRecord, existingRecords, windowDays = 9
   return {
     isDuplicate: matches.length > 0,
     matches: matches.map(m => ({
-      staff_id: m.staff_id,
+      staff_id: m.staff_id || m.staffId,
+      staffId: m.staff_id || m.staffId,
       name: m.name,
       dept: m.dept,
       steps: m.steps,
@@ -310,16 +311,21 @@ export const findDuplicateAlertsInPeriod = (allRecords, windowDays = 90) => {
       const lastDate = new Date(lastRecord.date);
       const daysDifference = Math.round(Math.abs((lastDate - firstDate) / msInDay));
 
-      const isSameStaff = firstRecord.staff_id === lastRecord.staff_id;
+      const firstStaffId = firstRecord.staff_id || firstRecord.staffId || '';
+      const lastStaffId = lastRecord.staff_id || lastRecord.staffId || '';
+      const isSameStaff = firstStaffId && lastStaffId && firstStaffId === lastStaffId;
+      const uploaderStaffIds = [...new Set(group.map(g => g.staff_id || g.staffId).filter(Boolean))];
 
       alerts.push({
-        id: `dup-${lastRecord.id || lastRecord.staff_id}-${lastRecord.date}-${stepsStr}`,
+        id: `dup-${lastRecord.id || lastStaffId}-${lastRecord.date}-${stepsStr}`,
         steps: Number(stepsStr),
         isSameStaff,
         daysDifference,
+        uploaderStaffIds,
         firstUploaded: {
           id: firstRecord.id,
-          staffId: firstRecord.staff_id,
+          staffId: firstStaffId,
+          staff_id: firstStaffId,
           name: firstRecord.name,
           dept: firstRecord.dept,
           date: firstRecord.date,
@@ -328,7 +334,8 @@ export const findDuplicateAlertsInPeriod = (allRecords, windowDays = 90) => {
         },
         lastUploaded: {
           id: lastRecord.id,
-          staffId: lastRecord.staff_id,
+          staffId: lastStaffId,
+          staff_id: lastStaffId,
           name: lastRecord.name,
           dept: lastRecord.dept,
           date: lastRecord.date,
@@ -337,7 +344,8 @@ export const findDuplicateAlertsInPeriod = (allRecords, windowDays = 90) => {
         },
         allMatchedRecords: group.map(g => ({
           id: g.id,
-          staffId: g.staff_id,
+          staffId: g.staff_id || g.staffId,
+          staff_id: g.staff_id || g.staffId,
           name: g.name,
           dept: g.dept,
           date: g.date,

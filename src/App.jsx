@@ -837,6 +837,7 @@ const AdminDashboard = () => {
   const [selectedDate, setSelectedDate] = useState(latestPastDate);
   const [filterDept, setFilterDept] = useState('All');
   const [sortOrder, setSortOrder] = useState('time');
+  const [filterDuplicatesOnly, setFilterDuplicatesOnly] = useState(false);
 
   useEffect(() => {
     const fetchAdminRecords = async () => {
@@ -856,7 +857,15 @@ const AdminDashboard = () => {
         const recordMap = new Map();
         pastRecords.forEach(r => recordMap.set(`${r.date}_${r.staff_id}`, r));
         (data || []).forEach(r => recordMap.set(`${r.date}_${r.staff_id}`, r));
-        const allFetched = Array.from(recordMap.values());
+        const allFetched = Array.from(recordMap.values()).map(r => {
+          const staff = mockStaffMembers.find(s => s.id === r.staff_id);
+          return {
+            ...r,
+            staff_id: r.staff_id,
+            name: r.name || staff?.name || r.staff_id,
+            dept: r.dept || staff?.dept || 'General'
+          };
+        });
         setAll90DayRecords(allFetched);
 
         // Detect 90-day duplicate screenshot / step count alerts across all staff
@@ -869,7 +878,15 @@ const AdminDashboard = () => {
         console.warn("Admin fetch fallback to past records:", err);
         const recordMap = new Map();
         pastRecords.forEach(r => recordMap.set(`${r.date}_${r.staff_id}`, r));
-        const allFetched = Array.from(recordMap.values());
+        const allFetched = Array.from(recordMap.values()).map(r => {
+          const staff = mockStaffMembers.find(s => s.id === r.staff_id);
+          return {
+            ...r,
+            staff_id: r.staff_id,
+            name: r.name || staff?.name || r.staff_id,
+            dept: r.dept || staff?.dept || 'General'
+          };
+        });
         setAll90DayRecords(allFetched);
         setDuplicateAlerts(findDuplicateAlertsInPeriod(allFetched, 90));
         setRecords(allFetched.filter(r => r.date === selectedDate));
@@ -886,7 +903,25 @@ const AdminDashboard = () => {
 
   const departments = ['All', ...new Set(mockStaffMembers.map(s => s.dept))];
 
-  let displayStaff = mockStaffMembers.filter(s => filterDept === 'All' || s.dept === filterDept);
+  // Set of all staff IDs that have uploaded a repeated step count in the 90-day window
+  const duplicateStaffIds = new Set(
+    duplicateAlerts.flatMap(a => (a.uploaderStaffIds || a.allMatchedRecords?.map(m => m.staffId) || []))
+  );
+
+  // Set of staff IDs that have a repeated step count specifically on the currently selected date
+  const selectedDateDuplicateStaffIds = new Set(
+    filteredRecords
+      .filter(r => duplicateAlerts.some(a => a.steps === r.steps && (a.uploaderStaffIds || []).includes(r.staff_id)))
+      .map(r => r.staff_id)
+  );
+
+  let displayStaff = mockStaffMembers.filter(s => {
+    if (filterDept !== 'All' && s.dept !== filterDept) return false;
+    if (filterDuplicatesOnly) {
+      return selectedDateDuplicateStaffIds.has(s.id) || duplicateStaffIds.has(s.id);
+    }
+    return true;
+  });
 
   displayStaff.sort((a, b) => {
     const recA = filteredRecords.find(r => r.staff_id === a.id);
@@ -959,63 +994,121 @@ const AdminDashboard = () => {
           <h4 style={{ color: 'var(--text-muted)', marginBottom: '0.5rem' }}>Incomplete</h4>
           <h1 style={{ color: 'var(--accent)' }}>{totalStaff - completedToday}</h1>
         </div>
-        <div className="glass-card" style={{ textAlign: 'center', border: duplicateAlerts.length > 0 ? '1px solid #fed7aa' : 'var(--glass-border)', background: duplicateAlerts.length > 0 ? '#fff7ed' : 'white' }}>
+        <div 
+          onClick={() => setFilterDuplicatesOnly(prev => !prev)}
+          className="glass-card" 
+          style={{ 
+            textAlign: 'center', 
+            border: duplicateAlerts.length > 0 ? (filterDuplicatesOnly ? '2px solid #ea580c' : '1px solid #fed7aa') : 'var(--glass-border)', 
+            background: filterDuplicatesOnly ? '#ffedd5' : (duplicateAlerts.length > 0 ? '#fff7ed' : 'white'),
+            cursor: 'pointer',
+            transition: 'all 0.2s ease'
+          }}
+          title="Click to filter table to only show staff with repeated values"
+        >
           <h4 style={{ color: duplicateAlerts.length > 0 ? '#c2410c' : 'var(--text-muted)', marginBottom: '0.5rem', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }}>
             <Bell size={16} /> 90-Day Duplicate Alerts
           </h4>
           <h1 style={{ color: duplicateAlerts.length > 0 ? '#ea580c' : 'var(--text-muted)' }}>{duplicateAlerts.length}</h1>
+          <span style={{ fontSize: '0.72rem', color: '#9a3412', fontWeight: 600, display: 'block', marginTop: '4px' }}>
+            {filterDuplicatesOnly ? '✓ Filter Active: Showing Repeated IDs' : '(Click to show repeated staff only)'}
+          </span>
         </div>
       </div>
 
       {/* 90-Day Duplicate Step Count Alert Notification Panel */}
       {duplicateAlerts.length > 0 && (
         <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} className="glass-card" style={{ marginBottom: '2rem', background: '#fff7ed', border: '1px solid #ffedd5', padding: '1.5rem', borderRadius: '16px' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem', flexWrap: 'wrap', gap: '0.5rem' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
               <div style={{ background: '#ea580c', padding: '8px', borderRadius: '10px', color: 'white', display: 'flex' }}>
                 <ShieldAlert size={22} />
               </div>
               <div>
                 <h3 style={{ margin: 0, color: '#9a3412', fontSize: '1.2rem' }}>90-Day Duplicate Step Count Notifications</h3>
-                <p style={{ margin: 0, color: '#c2410c', fontSize: '0.85rem' }}>Automated alerts for identical step counts uploaded within the last 90 days</p>
+                <p style={{ margin: 0, color: '#c2410c', fontSize: '0.85rem' }}>Automated alerts identifying staff Person IDs who uploaded identical repeated step counts</p>
               </div>
             </div>
-            <span style={{ background: '#ea580c', color: 'white', fontWeight: 'bold', padding: '4px 12px', borderRadius: '20px', fontSize: '0.8rem' }}>
-              {duplicateAlerts.length} Flagged {duplicateAlerts.length === 1 ? 'Anomaly' : 'Anomalies'}
-            </span>
+            <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+              <button
+                onClick={() => setFilterDuplicatesOnly(prev => !prev)}
+                style={{
+                  background: filterDuplicatesOnly ? '#ea580c' : 'white',
+                  color: filterDuplicatesOnly ? 'white' : '#ea580c',
+                  border: '1px solid #ea580c',
+                  padding: '4px 12px',
+                  borderRadius: '20px',
+                  fontSize: '0.8rem',
+                  fontWeight: 'bold',
+                  cursor: 'pointer'
+                }}
+              >
+                {filterDuplicatesOnly ? 'Showing Repeated Uploaders Only' : 'Filter Table to These IDs'}
+              </button>
+              <span style={{ background: '#ea580c', color: 'white', fontWeight: 'bold', padding: '4px 12px', borderRadius: '20px', fontSize: '0.8rem' }}>
+                {duplicateAlerts.length} Flagged {duplicateAlerts.length === 1 ? 'Anomaly' : 'Anomalies'}
+              </span>
+            </div>
           </div>
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-            {duplicateAlerts.map(alert => (
-              <div key={alert.id} style={{ background: 'white', borderLeft: '5px solid #ea580c', borderRadius: '12px', padding: '1rem 1.2rem', boxShadow: '0 2px 5px rgba(0,0,0,0.04)' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '0.5rem', marginBottom: '0.8rem' }}>
-                  <div>
-                    <span style={{ fontSize: '1.1rem', fontWeight: 'bold', color: '#ea580c' }}>
-                      {alert.steps.toLocaleString()} Steps
-                    </span>
-                    <span style={{ marginLeft: '10px', fontSize: '0.75rem', padding: '3px 8px', borderRadius: '12px', background: alert.isSameStaff ? '#eff6ff' : '#fef2f2', color: alert.isSameStaff ? '#1d4ed8' : '#991b1b', fontWeight: 'bold' }}>
-                      {alert.isSameStaff ? '🔄 Same Staff Re-Upload' : '⚠️ Cross-Staff Duplicate'}
-                    </span>
+            {duplicateAlerts.map(alert => {
+              const uploaderIds = alert.uploaderStaffIds || [...new Set(alert.allMatchedRecords?.map(m => m.staffId) || [])];
+              return (
+                <div key={alert.id} style={{ background: 'white', borderLeft: '5px solid #ea580c', borderRadius: '12px', padding: '1rem 1.2rem', boxShadow: '0 2px 5px rgba(0,0,0,0.04)' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '0.5rem', marginBottom: '0.8rem' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '8px' }}>
+                      <span style={{ fontSize: '1.15rem', fontWeight: 'bold', color: '#ea580c' }}>
+                        {alert.steps.toLocaleString()} Steps
+                      </span>
+                      <span style={{ fontSize: '0.75rem', padding: '3px 8px', borderRadius: '12px', background: alert.isSameStaff ? '#eff6ff' : '#fef2f2', color: alert.isSameStaff ? '#1d4ed8' : '#991b1b', fontWeight: 'bold' }}>
+                        {alert.isSameStaff ? '🔄 Same Staff Re-Upload' : '⚠️ Cross-Staff Duplicate'}
+                      </span>
+                      <span style={{ fontSize: '0.8rem', padding: '3px 10px', borderRadius: '8px', background: '#fef3c7', color: '#92400e', border: '1px solid #fde68a', fontWeight: 'bold', display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                        <User size={13} /> Person ID(s): <b style={{ fontFamily: 'monospace' }}>{uploaderIds.join(', ')}</b>
+                      </span>
+                    </div>
+                    <div style={{ fontSize: '0.8rem', color: '#64748b', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                      <Clock size={14} /> Gap: <b>{alert.daysDifference} days apart</b>
+                    </div>
                   </div>
-                  <div style={{ fontSize: '0.8rem', color: '#64748b', display: 'flex', alignItems: 'center', gap: '4px' }}>
-                    <Clock size={14} /> Gap: <b>{alert.daysDifference} days apart</b>
-                  </div>
-                </div>
 
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '1rem', background: '#f8fafc', padding: '0.8rem 1rem', borderRadius: '8px' }}>
-                  <div>
-                    <div style={{ fontSize: '0.75rem', fontWeight: 'bold', color: '#64748b', textTransform: 'uppercase', marginBottom: '2px' }}>First Uploaded Timestamp:</div>
-                    <div style={{ fontWeight: 600, color: '#1e293b' }}>{alert.firstUploaded.name} ({alert.firstUploaded.dept})</div>
-                    <div style={{ fontSize: '0.85rem', color: '#059669', fontWeight: 500 }}>📅 {alert.firstUploaded.timestampStr}</div>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '1rem', background: '#f8fafc', padding: '0.8rem 1rem', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
+                    <div>
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '4px' }}>
+                        <span style={{ fontSize: '0.72rem', fontWeight: 'bold', color: '#64748b', textTransform: 'uppercase' }}>First Uploaded:</span>
+                        <span style={{ background: '#dbeafe', color: '#1e40af', border: '1px solid #bfdbfe', padding: '1px 8px', borderRadius: '6px', fontSize: '0.75rem', fontWeight: 'bold', fontFamily: 'monospace' }}>
+                          Person ID: {alert.firstUploaded.staffId}
+                        </span>
+                      </div>
+                      <div style={{ fontWeight: 600, color: '#1e293b' }}>{alert.firstUploaded.name} ({alert.firstUploaded.dept})</div>
+                      <div style={{ fontSize: '0.85rem', color: '#059669', fontWeight: 500, marginTop: '3px' }}>📅 {alert.firstUploaded.timestampStr}</div>
+                    </div>
+                    <div>
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '4px' }}>
+                        <span style={{ fontSize: '0.72rem', fontWeight: 'bold', color: '#64748b', textTransform: 'uppercase' }}>Repeated / Last Upload:</span>
+                        <span style={{ background: '#fee2e2', color: '#991b1b', border: '1px solid #fecaca', padding: '1px 8px', borderRadius: '6px', fontSize: '0.75rem', fontWeight: 'bold', fontFamily: 'monospace' }}>
+                          Person ID: {alert.lastUploaded.staffId}
+                        </span>
+                      </div>
+                      <div style={{ fontWeight: 600, color: '#1e293b' }}>{alert.lastUploaded.name} ({alert.lastUploaded.dept})</div>
+                      <div style={{ fontSize: '0.85rem', color: '#dc2626', fontWeight: 500, marginTop: '3px' }}>📅 {alert.lastUploaded.timestampStr}</div>
+                    </div>
                   </div>
-                  <div>
-                    <div style={{ fontSize: '0.75rem', fontWeight: 'bold', color: '#64748b', textTransform: 'uppercase', marginBottom: '2px' }}>Last Uploaded Timestamp:</div>
-                    <div style={{ fontWeight: 600, color: '#1e293b' }}>{alert.lastUploaded.name} ({alert.lastUploaded.dept})</div>
-                    <div style={{ fontSize: '0.85rem', color: '#dc2626', fontWeight: 500 }}>📅 {alert.lastUploaded.timestampStr}</div>
-                  </div>
+
+                  {alert.allMatchedRecords && alert.allMatchedRecords.length > 0 && (
+                    <div style={{ marginTop: '0.75rem', paddingTop: '0.5rem', borderTop: '1px dashed #e2e8f0', display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '6px', fontSize: '0.78rem' }}>
+                      <span style={{ color: '#64748b', fontWeight: 600 }}>All Uploaders for this value:</span>
+                      {alert.allMatchedRecords.map((m, idx) => (
+                        <span key={idx} style={{ background: '#f1f5f9', color: '#1e293b', border: '1px solid #cbd5e1', padding: '2px 8px', borderRadius: '6px', fontWeight: 500 }}>
+                          Person ID: <b style={{ color: '#ea580c', fontFamily: 'monospace' }}>{m.staffId}</b> ({m.name} • {m.date})
+                        </span>
+                      ))}
+                    </div>
+                  )}
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         </motion.div>
       )}
@@ -1100,6 +1193,30 @@ const AdminDashboard = () => {
             </div>
 
             <button
+              onClick={() => setFilterDuplicatesOnly(prev => !prev)}
+              style={{
+                padding: '0.5rem 1rem',
+                height: '38px',
+                borderRadius: '8px',
+                fontSize: '0.82rem',
+                fontWeight: 'bold',
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px',
+                background: filterDuplicatesOnly ? '#ea580c' : '#fff7ed',
+                color: filterDuplicatesOnly ? 'white' : '#c2410c',
+                border: '1px solid #fed7aa',
+                boxShadow: filterDuplicatesOnly ? '0 2px 8px rgba(234,88,12,0.3)' : 'none',
+                transition: 'all 0.2s ease'
+              }}
+              title="Show only staff who uploaded repeated step counts"
+            >
+              <ShieldAlert size={16} />
+              {filterDuplicatesOnly ? 'Show All Staff' : `Only Repeated Uploads (${duplicateStaffIds.size})`}
+            </button>
+
+            <button
               onClick={() => exportToExcelFull(exportRecords, `Daily Report - ${selectedDate}`, null, mockStaffMembers)}
               className="btn-primary" style={{ padding: '0.5rem 1rem', height: '38px' }}
             >
@@ -1115,11 +1232,29 @@ const AdminDashboard = () => {
             </button>
           </div>
         </div>
+
+        {filterDuplicatesOnly && (
+          <div style={{ background: '#ffedd5', border: '1px solid #fed7aa', borderRadius: '10px', padding: '0.8rem 1.2rem', marginBottom: '1.2rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.5rem' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#9a3412' }}>
+              <ShieldAlert size={18} />
+              <span style={{ fontWeight: 600, fontSize: '0.88rem' }}>
+                Showing only staff Person IDs who uploaded repeated step count values ({displayStaff.length} staff found).
+              </span>
+            </div>
+            <button 
+              onClick={() => setFilterDuplicatesOnly(false)} 
+              style={{ background: 'white', border: '1px solid #fdba74', color: '#c2410c', padding: '4px 12px', borderRadius: '6px', fontSize: '0.78rem', fontWeight: 'bold', cursor: 'pointer' }}
+            >
+              Show All Staff
+            </button>
+          </div>
+        )}
+
         <div className="table-wrapper">
           <table style={{ width: '100%', borderCollapse: 'collapse' }}>
           <thead>
             <tr style={{ borderBottom: '1px solid var(--glass-border)', textAlign: 'left', color: 'var(--text-muted)' }}>
-              <th style={{ padding: '1rem' }}>Staff Name</th>
+              <th style={{ padding: '1rem' }}>Staff Name & Person ID</th>
               <th>Department</th>
               <th>Steps</th>
               <th>Reason</th>
@@ -1141,31 +1276,71 @@ const AdminDashboard = () => {
             ) : displayStaff.length === 0 ? (
               <tr>
                 <td colSpan="7" style={{ padding: '2rem', textAlign: 'center', color: 'var(--text-muted)' }}>
-                  No staff members found.
+                  {filterDuplicatesOnly ? 'No repeated step count uploads found matching current filters.' : 'No staff members found.'}
                 </td>
               </tr>
             ) : (
               displayStaff.map(staff => {
                 const record = filteredRecords.find(r => r.staff_id === staff.id);
-                // Check if this record is part of a 90-day duplicate alert
-                const matchingAlert = record ? duplicateAlerts.find(a => a.steps === record.steps) : null;
+                // Check if this record is part of a 90-day duplicate alert AND uploaded by this staff member
+                const matchingAlert = record 
+                  ? duplicateAlerts.find(a => a.steps === record.steps && (a.uploaderStaffIds ? a.uploaderStaffIds.includes(staff.id) : a.allMatchedRecords?.some(m => m.staffId === staff.id))) 
+                  : null;
                 
                 return (
-                  <tr key={staff.id} style={{ borderBottom: '1px solid var(--glass-border)' }}>
-                    <td style={{ padding: '1rem' }}>
-                      <div style={{ fontWeight: 600 }}>{staff.name}</div>
-                      <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>ID: {staff.id}</div>
+                  <tr key={staff.id} style={{ borderBottom: '1px solid var(--glass-border)', background: matchingAlert ? '#fffaf5' : undefined }}>
+                    <td style={{ padding: '1rem', borderLeft: matchingAlert ? '4px solid #ea580c' : undefined }}>
+                      <div style={{ fontWeight: 600, color: matchingAlert ? '#9a3412' : 'inherit' }}>{staff.name}</div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginTop: '3px' }}>
+                        <span style={{ 
+                          fontSize: '0.78rem', 
+                          fontWeight: matchingAlert ? 'bold' : 'normal',
+                          background: matchingAlert ? '#fed7aa' : '#f1f5f9',
+                          color: matchingAlert ? '#7c2d12' : 'var(--text-muted)',
+                          padding: '1px 6px',
+                          borderRadius: '4px',
+                          fontFamily: 'monospace',
+                          border: matchingAlert ? '1px solid #fdba74' : 'none'
+                        }}>
+                          Person ID: {staff.id}
+                        </span>
+                        {matchingAlert && (
+                          <span style={{ fontSize: '0.68rem', background: '#fee2e2', color: '#991b1b', padding: '1px 5px', borderRadius: '4px', fontWeight: 'bold' }}>
+                            Repeated Value
+                          </span>
+                        )}
+                      </div>
                     </td>
                     <td>{staff.dept}</td>
                     <td style={{ fontWeight: 'bold', color: (record?.steps >= 5000 || record?.reason) ? '#16a34a' : (record ? '#dc2626' : 'inherit') }}>
                       {record ? (
                         <div>
-                          <span>{record.steps.toLocaleString()}</span>
+                          <div style={{ fontSize: '1.05rem' }}>{record.steps.toLocaleString()}</div>
                           {matchingAlert && (
-                            <div style={{ marginTop: '2px' }}>
-                              <span style={{ background: '#fff7ed', color: '#c2410c', border: '1px solid #ffedd5', padding: '2px 6px', borderRadius: '10px', fontSize: '0.7rem', fontWeight: 'bold', display: 'inline-flex', alignItems: 'center', gap: '3px' }}>
-                                <AlertTriangle size={10} /> 90-Day Duplicate
-                              </span>
+                            <div style={{ marginTop: '4px' }}>
+                              <div style={{
+                                background: '#fff7ed',
+                                border: '1px solid #fed7aa',
+                                borderRadius: '8px',
+                                padding: '4px 8px',
+                                display: 'inline-flex',
+                                flexDirection: 'column',
+                                gap: '3px',
+                                boxShadow: '0 1px 2px rgba(234,88,12,0.1)'
+                              }}>
+                                <div style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', color: '#c2410c', fontSize: '0.72rem', fontWeight: 'bold' }}>
+                                  <AlertTriangle size={12} color="#ea580c" />
+                                  <span>Repeated Value</span>
+                                </div>
+                                <div style={{ fontSize: '0.72rem', color: '#9a3412', fontWeight: 600 }}>
+                                  Uploader Person ID: <span style={{ fontFamily: 'monospace', background: '#ffedd5', color: '#7c2d12', padding: '1px 6px', borderRadius: '4px', fontWeight: 'bold', border: '1px solid #fed7aa' }}>{staff.id}</span>
+                                </div>
+                                {matchingAlert.uploaderStaffIds && matchingAlert.uploaderStaffIds.filter(id => id !== staff.id).length > 0 && (
+                                  <div style={{ fontSize: '0.68rem', color: '#64748b' }}>
+                                    Also uploaded by Person ID(s): {matchingAlert.uploaderStaffIds.filter(id => id !== staff.id).join(', ')}
+                                  </div>
+                                )}
+                              </div>
                             </div>
                           )}
                         </div>
