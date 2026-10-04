@@ -270,7 +270,7 @@ const exportToExcelFull = async (records, title = 'Staff Step Count Report', sta
       applyDataStyle(row);
     }
 
-    const depts = ['CSE', 'IT', 'MCA', 'AI&DS', 'Cyber Security', 'Automobile', 'Civil', 'ECE', 'EEE', 'Mech', 'S&H', 'COE', 'Exam Cell', 'Library', 'Placement', 'Admission', 'Office', 'MBA', 'Yoga', 'PD', 'FM Radio'];
+    const depts = [...new Set(mockStaffMembers.filter(s => s.id !== 'principal').map(s => s.dept))];
     
     depts.forEach(deptName => {
       const deptStaff = mockStaffMembers.filter(s => s.dept.includes(deptName) && s.id !== 'principal');
@@ -483,12 +483,14 @@ const Login = ({ onLogin }) => {
 
   const handleSubmit = (e) => {
     e.preventDefault();
-    if (id === ADMIN_CREDENTIALS.id && password === ADMIN_CREDENTIALS.password) {
-      onLogin({ role: 'admin', id });
+    const trimmedId = id.trim();
+    const trimmedPassword = password.trim();
+    if (trimmedId.toLowerCase() === ADMIN_CREDENTIALS.id.toLowerCase() && trimmedPassword === ADMIN_CREDENTIALS.password) {
+      onLogin({ role: 'admin', id: 'admin', name: 'System Administrator' });
     } else {
-      const staff = mockStaffMembers.find(s => s.id.toLowerCase() === id.toLowerCase());
+      const staff = mockStaffMembers.find(s => s.id.toLowerCase() === trimmedId.toLowerCase());
       if (staff) {
-        if (staff.password === password) {
+        if (staff.password === trimmedPassword) {
           onLogin({ role: 'staff', ...staff });
         } else {
           setError('Incorrect password');
@@ -848,15 +850,30 @@ const AdminDashboard = () => {
         ninetyDaysAgo.setDate(ninetyDaysAgo.getDate() - 90);
         const cutoffStr = ninetyDaysAgo.toISOString().substring(0, 10);
 
-        const { data, error } = await supabase
-          .from('step_records')
-          .select('*')
-          .gte('date', cutoffStr);
+        // Paginate fetching to overcome Supabase PostgREST default 1,000-row limit
+        let cloudData = [];
+        let from = 0;
+        const pageSize = 1000;
+        while (true) {
+          const { data, error: fetchErr } = await supabase
+            .from('step_records')
+            .select('*')
+            .gte('date', cutoffStr)
+            .range(from, from + pageSize - 1);
+          if (fetchErr) {
+            console.warn("Supabase pagination fetch error:", fetchErr.message);
+            break;
+          }
+          if (!data || data.length === 0) break;
+          cloudData = cloudData.concat(data);
+          if (data.length < pageSize) break;
+          from += pageSize;
+        }
           
         // Combine past records with any cloud records
         const recordMap = new Map();
         pastRecords.forEach(r => recordMap.set(`${r.date}_${r.staff_id}`, r));
-        (data || []).forEach(r => recordMap.set(`${r.date}_${r.staff_id}`, r));
+        cloudData.forEach(r => recordMap.set(`${r.date}_${r.staff_id}`, r));
         const allFetched = Array.from(recordMap.values()).map(r => {
           const staff = mockStaffMembers.find(s => s.id === r.staff_id);
           return {
@@ -933,9 +950,9 @@ const AdminDashboard = () => {
       const sb = recB ? recB.steps : 999999;
       return sa - sb;
     }
-    const timeA = recA ? recA.id : 0;
-    const timeB = recB ? recB.id : 0;
-    return timeB - timeA;
+    const timeA = recA ? new Date(`${recA.date} ${recA.uploaded_time || recA.time || '00:00'}`).getTime() : 0;
+    const timeB = recB ? new Date(`${recB.date} ${recB.uploaded_time || recB.time || '00:00'}`).getTime() : 0;
+    return (timeB || 0) - (timeA || 0);
   });
 
   const exportRecords = filteredRecords.filter(r => {
@@ -944,7 +961,9 @@ const AdminDashboard = () => {
   }).sort((a, b) => {
     if (sortOrder === 'steps-high') return b.steps - a.steps;
     if (sortOrder === 'steps-low') return a.steps - b.steps;
-    return b.id - a.id;
+    const dateA = a ? new Date(`${a.date} ${a.uploaded_time || a.time || '00:00'}`).getTime() : 0;
+    const dateB = b ? new Date(`${b.date} ${b.uploaded_time || b.time || '00:00'}`).getTime() : 0;
+    return (dateB || 0) - (dateA || 0);
   });
 
   const sortedByPerformance = [...filteredRecords].sort((a, b) => b.steps - a.steps);

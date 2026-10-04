@@ -46,6 +46,15 @@ describe('Step Count Extraction Logic', () => {
     expect(steps).toBe(12500);
   });
 
+  it('should prioritize actual step count over larger goal/target step count', () => {
+    const ocrText = "Goal: 10,000 steps. Today: 4,520 steps. 320 kcal";
+    const cleaned = cleanText(ocrText);
+    const tokens = tokenize(cleaned);
+    const steps = extractSteps(tokens);
+    
+    expect(steps).toBe(4520);
+  });
+
   it('should correctly handle comma separated numbers', () => {
     const ocrText = "You walked 10,245 steps today!";
     const cleaned = cleanText(ocrText);

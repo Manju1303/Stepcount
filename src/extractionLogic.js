@@ -70,8 +70,8 @@ export const tokenize = (text) => {
   for (let i = 0; i < rawTokens.length; i++) {
     let t = rawTokens[i];
 
-    // Filter out calendar years
-    if (/^(2023|2024|2025|2026)$/.test(t)) {
+    // Filter out calendar years (e.g. 1990 - 2099)
+    if (/^(19\d\d|20\d\d)$/.test(t)) {
       continue;
     }
 
@@ -97,6 +97,7 @@ export const tokenize = (text) => {
 };
 
 const UNITS = ['cal', 'kcal', 'calories', 'mi', 'miles', 'km', 'kilometers', 'min', 'mins', 'minutes', 'bpm', 'kg', 'lbs', 'move'];
+const GOAL_KEYWORDS = ['goal', 'goals', 'target', 'targets', 'aim', 'limit'];
 const STEPS_KEYWORDS = [
   'steps', 'step', 'staps', 'stept', 'sleps', 'stepe', 'stps', 'slps',
   'stesp', 'sreps', 'siers', 's1eps', 'stes', 'stecs', 'steos', 'stees',
@@ -150,6 +151,7 @@ export const extractSteps = (tokens) => {
       let unitDistance = 99;
       let hasStepsKeyword = false;
       let stepsDistance = 99;
+      let isGoalValue = false;
 
       // Check neighbors in range [-5, 5] to identify context
       for (let offset = -5; offset <= 5; offset++) {
@@ -171,6 +173,13 @@ export const extractSteps = (tokens) => {
             }
           }
 
+          if (GOAL_KEYWORDS.includes(cleanNeighbor)) {
+            const dist = Math.abs(offset);
+            if (dist <= 2) {
+              isGoalValue = true;
+            }
+          }
+
           if (isStepsKeyword(cleanNeighbor)) {
             hasStepsKeyword = true;
             const dist = Math.abs(offset);
@@ -184,7 +193,10 @@ export const extractSteps = (tokens) => {
       let score = 0;
       // Only recognize steps keyword if it is closer or equal to any unit keyword (prevent calorie/distance confusion)
       if (hasStepsKeyword && stepsDistance <= unitDistance) {
-        if (stepsDistance === 1) {
+        if (isGoalValue) {
+          // Deprioritize goal / daily target values so actual steps walked take precedence
+          score = 3;
+        } else if (stepsDistance === 1) {
           score = 10;
         } else if (stepsDistance === 2) {
           score = 9;
@@ -195,7 +207,7 @@ export const extractSteps = (tokens) => {
         } else {
           score = 6;
         }
-      } else if (!isUnitValue) {
+      } else if (!isUnitValue && !isGoalValue) {
         // Unlabeled candidate: give higher weight if it looks like a typical step count
         score = val >= 100 ? 1 : 0.1;
       }
