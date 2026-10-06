@@ -22,16 +22,20 @@ Deployed on **Vercel** with a centralized **Supabase (PostgreSQL)** backend.
     *   **Fuzzy Levenshtein Keyword Matching**: Employs edit-distance matching with expanded vocabulary (`steps`, `step`, `staps`, `stes`, `stps`, `slps`, `sleps`, `siers`, `sreps`, `stecs`, `steos`, `stept`, `stepcount`).
     *   **Column Layout Proximity Filtering**: Bounds unit detection (`Cal`, `mi`, `km`, `min`, `bpm`) to $\le 2$ tokens to prevent multi-column crosstalk.
 *   **90-Day Duplicate Step Count Detection**:
-    *   Automatically flags duplicate step counts submitted by the same staff member or across different staff members within a 90-day window.
-    *   Displays admin audit alerts with first and last upload timestamps and day differences.
-*   **Comprehensive Excel Reporting**:
-    *   **Department Attendance Sheet**: Formatted print-ready A4 report grouped by department with S.NO, Name & Designation, Steps, Timing, and Remarks.
-    *   **Dedicated Pending List Worksheet**: Built-in tab listing non-submitting staff for the day.
-    *   **1-Click Pending List Export**: Dedicated button to download `Pending_Staff_Report_{date}.xlsx` for instant defaulter follow-up.
-    *   **Pre-Generated 20-Day Defaulter Report**: `Staff_Step_Count_Pending_and_Defaulter_Report.xlsx` tracking all pending instances and staff compliance rankings.
-*   **Historical Records & Offline Resilience**:
-    *   Pre-seeded with **2,139 past attendance records** spanning August 30 to September 18, 2026.
-    *   Synchronized live to Supabase (`step_records` table) with built-in client fallback.
+    *   Flags duplicate step counts submitted by the **same staff member** across different calendar dates within a previous 90-day window.
+    *   Employs calendar-date midnight boundaries (`dayDiff > 0 && dayDiff <= 90`), excluding same-day and future-dated records.
+    *   Displays admin audit notifications with first and last upload timestamps and day differences.
+*   **Unified Institutional Excel Reporting**:
+    *   **Single Unified Export**: Single `📊 Export Attendance Report` button in the Admin Dashboard generating a standardized, print-ready A4 workbook.
+    *   **Official Layout**: Grouped by academic and administrative departments with college header, Times New Roman typography, and precise column alignments.
+    *   **Absent Handling**: Step count and timing cells for non-submitters are **left completely empty/blank**, with remarks marked as **`PENDING`**.
+    *   **Bottom Summary & Numbered Pending List**: Automatically calculates `PRESENT <count>`, `ABSENT NIL`, `PENDING <count>`, followed by the numbered defaulter list (`1. <Staff Name> - <Dept>`) and the Principal signature line.
+    *   **Secondary Sheet**: Contains a dedicated tabular `'Pending Staff'` worksheet for administrative records.
+*   **Performance, Timezone & Offline Resilience**:
+    *   **Explicit IST Timezone**: All timestamps and submission dates are generated in `Asia/Kolkata` (`YYYY-MM-DD`, `HH:mm`, `hh:mm:ss AM/PM`).
+    *   **Bundle Code-Splitting**: Historical records (`pastRecords.js`, 344 KB) are lazy-loaded on demand, significantly speeding up initial page load on mobile.
+    *   **Persistent Tesseract Worker**: Single reusable OCR worker singleton accelerates image recognition by 3x–5x and prevents web worker memory leaks.
+    *   **Offline Submission Queue**: Offline submissions are safely stored in `localStorage` (`pending_sync_records`) and automatically synchronized when network connectivity returns.
 
 ---
 
@@ -44,7 +48,7 @@ Deployed on **Vercel** with a centralized **Supabase (PostgreSQL)** backend.
 *   **Excel Engine**: ExcelJS, FileSaver
 *   **Cloud Database**: Supabase (PostgreSQL)
 *   **Deployment**: Vercel
-*   **Test Suite**: Vitest (100% pass rate across 23 unit tests)
+*   **Test Suite**: Vitest (100% pass rate across 29 unit tests)
 
 ---
 
@@ -75,7 +79,7 @@ graph TD
 
 ## 👥 Staff Credentials
 
-All **141 staff members** are configured in [`src/data.js`](src/data.js).
+All **141 staff members** are configured in [`src/data.js`](src/data.js). Reference credentials list is available in [`STAFF_CREDENTIALS.md`](STAFF_CREDENTIALS.md).
 
 | Role | Identifier | Password | Access Level |
 | :--- | :--- | :--- | :--- |
@@ -99,7 +103,7 @@ All **141 staff members** are configured in [`src/data.js`](src/data.js).
 
 ---
 
-## 📊 Database Schema (`step_records`)
+## 📊 Database Schema & Constraints (`step_records`)
 
 ```sql
 CREATE TABLE step_records (
@@ -116,7 +120,12 @@ CREATE TABLE step_records (
 );
 ```
 
-*Database backups are preserved in `step_records_seed.json` and `step_records_seed.sql`.*
+### Applying Database Migration in Supabase SQL Editor
+To enforce database-level uniqueness against double submissions and optimize query performance, run the script [`SUPABASE_CONSTRAINT_MIGRATION.sql`](SUPABASE_CONSTRAINT_MIGRATION.sql):
+1. **Diagnostic Query**: Checks for any existing duplicate submissions on `(staff_id, date)`.
+2. **Remediation**: Retains the highest step count row and deletes accidental duplicates.
+3. **Unique Constraint**: Adds `CONSTRAINT unique_staff_date UNIQUE (staff_id, date)`.
+4. **Composite Indexes**: Adds indexes for `(staff_id, steps, date)` and `(date DESC)`.
 
 ---
 
