@@ -24,12 +24,55 @@ import Tesseract from 'tesseract.js';
 import ExcelJS from 'exceljs';
 import { saveAs } from 'file-saver';
 import { mockStaffMembers, ADMIN_CREDENTIALS } from './data';
-import { pastRecords } from './pastRecords';
 import { supabase } from './supabaseClient';
 import { cleanText, tokenize, extractSteps, detect90DayDuplicates, findDuplicateAlertsInPeriod } from './extractionLogic';
 import logo from './assets/logo.png';
 import header from './assets/header.png';
 
+// Lazy loader for historical records to reduce initial JS bundle size by >500 KB
+let _cachedPastRecords = null;
+const getPastRecords = async () => {
+  if (_cachedPastRecords) return _cachedPastRecords;
+  const mod = await import('./pastRecords');
+  _cachedPastRecords = mod.pastRecords;
+  return _cachedPastRecords;
+};
+
+// --- Offline Queue Helpers ---
+const saveOfflineRecord = (rec) => {
+  try {
+    const queue = JSON.parse(localStorage.getItem('pending_sync_records') || '[]');
+    queue.push(rec);
+    localStorage.setItem('pending_sync_records', JSON.stringify(queue));
+  } catch (e) {
+    console.error("Offline queue save error:", e);
+  }
+};
+
+const syncPendingRecords = async () => {
+  try {
+    const queue = JSON.parse(localStorage.getItem('pending_sync_records') || '[]');
+    if (!queue || queue.length === 0) return;
+    const remaining = [];
+    for (const rec of queue) {
+      const { id, ...cleanRec } = rec;
+      const { error } = await supabase.from('step_records').insert([cleanRec]);
+      if (error) remaining.push(rec);
+    }
+    localStorage.setItem('pending_sync_records', JSON.stringify(remaining));
+  } catch (e) {
+    console.warn("Failed to sync pending offline records:", e);
+  }
+};
+
+// --- Reusable Tesseract Worker Singleton ---
+let tesseractWorker = null;
+const getTesseractWorker = async () => {
+  if (!tesseractWorker) {
+    tesseractWorker = await Tesseract.createWorker('eng');
+  }
+  return tesseractWorker;
+};
 
 // --- Services ---
 
@@ -132,32 +175,53 @@ const preprocessSmartwatchPhoto = (imageSrc) => {
 };
 
 const processScreenshot = async (image) => {
-  // Pass 1: Try processing with standard portrait cropping
-  let processedImage = await preprocessImage(image, true);
-  let result = await Tesseract.recognize(processedImage, 'eng');
-  let text = result.data.text;
-  let cleaned = cleanText(text);
-  let tokens = tokenize(cleaned);
-  let steps = extractSteps(tokens);
+  let steps = 0;
+  try {
+    const worker = await getTesseractWorker();
 
-  // Pass 2: Fallback to full uncropped image if 0 steps found (common for cropped smartwatch images)
-  if (steps === 0) {
-    processedImage = await preprocessImage(image, false);
-    result = await Tesseract.recognize(processedImage, 'eng');
-    text = result.data.text;
-    cleaned = cleanText(text);
-    tokens = tokenize(cleaned);
+    // Pass 1: Try processing with standard portrait cropping
+    let processedImage = await preprocessImage(image, true);
+    let result = await worker.recognize(processedImage);
+    let text = result.data.text;
+    let cleaned = cleanText(text);
+    let tokens = tokenize(cleaned);
     steps = extractSteps(tokens);
-  }
 
-  // Pass 3: Smartwatch camera photo on wrist fallback (ambient lighting & skin background)
-  if (steps === 0) {
-    processedImage = await preprocessSmartwatchPhoto(image);
-    result = await Tesseract.recognize(processedImage, 'eng');
-    text = result.data.text;
-    cleaned = cleanText(text);
-    tokens = tokenize(cleaned);
+    // Pass 2: Fallback to full uncropped image if 0 steps found
+    if (steps === 0) {
+      processedImage = await preprocessImage(image, false);
+      result = await worker.recognize(processedImage);
+      text = result.data.text;
+      cleaned = cleanText(text);
+      tokens = tokenize(cleaned);
+      steps = extractSteps(tokens);
+    }
+
+    // Pass 3: Smartwatch camera photo on wrist fallback
+    if (steps === 0) {
+      processedImage = await preprocessSmartwatchPhoto(image);
+      result = await worker.recognize(processedImage);
+      text = result.data.text;
+      cleaned = cleanText(text);
+      tokens = tokenize(cleaned);
+      steps = extractSteps(tokens);
+    }
+  } catch (err) {
+    console.warn("Worker recognition error, falling back to direct Tesseract.recognize:", err);
+    let processedImage = await preprocessImage(image, true);
+    let result = await Tesseract.recognize(processedImage, 'eng');
+    let text = result.data.text;
+    let cleaned = cleanText(text);
+    let tokens = tokenize(cleaned);
     steps = extractSteps(tokens);
+    if (steps === 0) {
+      processedImage = await preprocessImage(image, false);
+      result = await Tesseract.recognize(processedImage, 'eng');
+      text = result.data.text;
+      cleaned = cleanText(text);
+      tokens = tokenize(cleaned);
+      steps = extractSteps(tokens);
+    }
   }
 
   const now = new Date();
@@ -168,16 +232,31 @@ const processScreenshot = async (image) => {
   return { steps, date, time, uploadedTime };
 };
 
-const exportToExcelFull = async (records, title = 'Staff Step Count Report', staffMember = null, allExpectedStaff = null) => {
+const exportToExcelFull = async (records, title = 'Staff Step Count Report', staffMember = null, allExpectedStaff = null, targetDate = null) => {
   const workbook = new ExcelJS.Workbook();
-  const worksheet = workbook.addWorksheet('Report');
+  const worksheet = workbook.addWorksheet('Attendance Report');
 
   worksheet.pageSetup.paperSize = 9; // A4
   worksheet.pageSetup.orientation = 'portrait';
   worksheet.pageSetup.fitToPage = true;
   worksheet.pageSetup.fitToWidth = 1;
   worksheet.pageSetup.fitToHeight = 0;
-  worksheet.pageSetup.margins = { left: 0.3, right: 0.3, top: 0.5, bottom: 0.5, header: 0.3, footer: 0.3 };
+  worksheet.pageSetup.margins = { left: 0.3, right: 0.3, top: 0.4, bottom: 0.4, header: 0.2, footer: 0.2 };
+
+  // Determine report date string
+  const dateMatch = title.match(/\d{4}-\d{2}-\d{2}/);
+  const reportDateStr = targetDate || (staffMember && records[0] ? records[0].date : (dateMatch ? dateMatch[0] : new Date().toLocaleDateString('en-CA')));
+  
+  // Format as DD.MM.YYYY and Day Name (e.g. 12.09.2026 - SATURDAY STEP COUNT NAMELIST)
+  let dateFormatted = reportDateStr;
+  let dayName = '';
+  const dateParts = reportDateStr.split('-');
+  if (dateParts.length === 3) {
+    const [y, m, d] = dateParts;
+    dateFormatted = `${d}.${m}.${y}`;
+    const dt = new Date(`${reportDateStr}T12:00:00`);
+    dayName = dt.toLocaleDateString('en-US', { weekday: 'long' }).toUpperCase();
+  }
 
   // --- Header Implementation ---
   const addHeader = async () => {
@@ -188,54 +267,53 @@ const exportToExcelFull = async (records, title = 'Staff Step Count Report', sta
       const headerResp = await fetch(header);
       const headerBuf = await headerResp.arrayBuffer();
       const headerId = workbook.addImage({ buffer: headerBuf, extension: 'png' });
-      // tl: { col: 0, row: 0 } means top-left of cell A1
       worksheet.addImage(headerId, { 
         tl: { col: 0, row: 0 }, 
         ext: { width: 550, height: 110 } 
       });
     } catch (e) { console.error("Header logo load failed", e); }
 
-    // Extract date from title "Daily Report - YYYY-MM-DD" or similar
-    const dateMatch = title.match(/\d{4}-\d{2}-\d{2}/);
-    const reportDateStr = staffMember && records[0] ? records[0].date : (dateMatch ? dateMatch[0] : new Date().toLocaleDateString('en-CA'));
-    const dayName = new Date(reportDateStr).toLocaleDateString('en-US', { weekday: 'long' }).toUpperCase();
-    const subTitles = [
+    const subTitles = staffMember ? [
+      { text: "FACULTY WELFARE CLUB", font: { name: 'Times New Roman', size: 12, bold: true } },
+      { text: "INDIVIDUAL STAFF FITNESS ACTIVITY REPORT", font: { name: 'Times New Roman', size: 12, bold: true } },
+      { text: `${staffMember.name.toUpperCase()} - ${staffMember.dept.toUpperCase()} (${title.toUpperCase()})`, font: { name: 'Times New Roman', size: 12, bold: true } }
+    ] : [
       { text: "FACULTY WELFARE CLUB", font: { name: 'Times New Roman', size: 12, bold: true } },
       { text: "FITNESS ACTIVITY ATTENDANCE - 2026", font: { name: 'Times New Roman', size: 12, bold: true } },
-      { text: `${title.toUpperCase()} ${dayName ? `- ${dayName} ` : ''}STEP COUNT NAMELIST`, font: { name: 'Times New Roman', size: 12, bold: true } }
+      { text: `${dateFormatted} - ${dayName} STEP COUNT NAMELIST`, font: { name: 'Times New Roman', size: 12, bold: true } }
     ];
 
     subTitles.forEach((st, i) => {
-      const rowNum = i + 2; // Offset by header image row
+      const rowNum = i + 2;
       worksheet.mergeCells(`A${rowNum}:E${rowNum}`);
       const cell = worksheet.getCell(`A${rowNum}`);
       cell.value = st.text;
       cell.font = st.font;
-      cell.alignment = { horizontal: 'center' };
+      cell.alignment = { horizontal: 'center', vertical: 'middle' };
       worksheet.getRow(rowNum).height = 20;
     });
   };
 
   await addHeader();
 
-  // Column Config
-  worksheet.getColumn(1).width = 6;   // S.NO
-  worksheet.getColumn(2).width = 45;  // NAME AND DESIGNATION
-  worksheet.getColumn(3).width = 15;  // STEP COUNT
-  worksheet.getColumn(4).width = 20;  // TIMING
+  // Column Configuration with Proper Alignment
+  worksheet.getColumn(1).width = 7;   // S.NO
+  worksheet.getColumn(2).width = 46;  // NAME AND DESIGNATION
+  worksheet.getColumn(3).width = 16;  // STEP COUNT
+  worksheet.getColumn(4).width = 16;  // TIMING
   worksheet.getColumn(5).width = 25;  // REMARKS
 
   const applyDataStyle = (row) => {
-    row.eachCell((cell) => {
+    row.eachCell({ includeEmpty: true }, (cell) => {
       cell.font = { name: 'Times New Roman', size: 11 };
       cell.border = { top: { style: 'thin' }, left: { style: 'thin' }, bottom: { style: 'thin' }, right: { style: 'thin' } };
       cell.alignment = { horizontal: 'left', vertical: 'middle', indent: 1 };
     });
-    row.getCell(1).alignment = { horizontal: 'center' };
-    row.getCell(3).alignment = { horizontal: 'center' };
-    row.getCell(4).alignment = { horizontal: 'center' };
-    row.getCell(5).alignment = { horizontal: 'center' };
-    row.height = 25;
+    row.getCell(1).alignment = { horizontal: 'center', vertical: 'middle' };
+    row.getCell(3).alignment = { horizontal: 'center', vertical: 'middle' };
+    row.getCell(4).alignment = { horizontal: 'center', vertical: 'middle' };
+    row.getCell(5).alignment = { horizontal: 'center', vertical: 'middle' };
+    row.height = 24;
   };
 
   const addTableHeader = (y) => {
@@ -246,83 +324,186 @@ const exportToExcelFull = async (records, title = 'Staff Step Count Report', sta
       c.border = { top: { style: 'medium' }, left: { style: 'medium' }, bottom: { style: 'medium' }, right: { style: 'medium' } };
       c.alignment = { horizontal: 'center', vertical: 'middle' };
     });
-    // Vertical text for S.NO
-    row.getCell(1).alignment = { textRotation: 90, horizontal: 'center', vertical: 'middle' };
-    row.height = 45;
+    row.height = 36;
   };
 
-  let gSNo = 1;
-  let curY = 6; // Start table at row 6
+  let curY = 6;
   addTableHeader(curY++);
 
   if (staffMember) {
-    // Individual Report
+    // Individual Monthly Staff Report
+    let sNo = 1;
     [...records].sort((a,b) => new Date(b.date) - new Date(a.date)).forEach((rec) => {
-      const row = worksheet.addRow([gSNo++, `${rec.name || staffMember.name} - ${staffMember.dept}`, rec.steps, rec.uploaded_time || rec.time || 'N/A', rec.reason || '']);
+      const stepVal = rec.steps || '';
+      const timeVal = rec.uploaded_time || rec.time || '';
+      const remVal = rec.steps < 5000 ? (rec.reason || 'LOW') : (rec.reason || '');
+      const row = worksheet.addRow([sNo++, `${rec.name || staffMember.name} - ${staffMember.dept}`, stepVal, timeVal, remVal]);
       applyDataStyle(row);
+      if (rec.steps < 5000) {
+        row.getCell(3).font = { name: 'Times New Roman', size: 11, bold: true, color: { argb: 'FFDC2626' } };
+        row.getCell(5).font = { name: 'Times New Roman', size: 11, bold: true, color: { argb: 'FFDC2626' } };
+      }
     });
   } else {
-    // Admin Report: Grouped by Department
-    const principal = mockStaffMembers.find(s => s.id === 'principal');
+    // Admin Full Institutional Report strictly formatted to FITNESS SEPTEMBER 12.pdf
+    const staffList = allExpectedStaff || mockStaffMembers;
+    const pendingStaffList = [];
+    const handledStaffIds = new Set();
+    let gSNo = 1;
+
+    // 1. Principal Row
+    const principal = staffList.find(s => s.id === 'principal');
     if (principal) {
+      handledStaffIds.add('principal');
       const rec = records.find(r => r.staff_id === 'principal');
-      const row = worksheet.addRow([gSNo++, `${principal.name} - *Principal sir*`, rec ? rec.steps : 'ABSENT', rec ? (rec.uploaded_time || rec.time) : '', '']);
+      const stepVal = rec && rec.steps ? rec.steps : '';
+      const timeVal = rec && (rec.uploaded_time || rec.time) ? (rec.uploaded_time || rec.time) : '';
+      const remarksVal = rec ? (rec.steps < 5000 ? (rec.reason || 'LOW') : (rec.reason || '')) : 'PENDING';
+      if (!rec || !rec.steps) pendingStaffList.push(principal);
+
+      const row = worksheet.addRow([gSNo++, `${principal.name} - *Principal sir*`, stepVal, timeVal, remarksVal]);
       applyDataStyle(row);
+      if (!rec || !rec.steps) {
+        row.getCell(5).font = { name: 'Times New Roman', size: 11, bold: true, color: { argb: 'FF991B1B' } };
+      } else if (rec.steps < 5000) {
+        row.getCell(3).font = { name: 'Times New Roman', size: 11, bold: true, color: { argb: 'FFDC2626' } };
+        row.getCell(5).font = { name: 'Times New Roman', size: 11, bold: true, color: { argb: 'FFDC2626' } };
+      }
     }
 
-    const depts = [...new Set(mockStaffMembers.filter(s => s.id !== 'principal').map(s => s.dept))];
-    
-    depts.forEach(deptName => {
-      const deptStaff = mockStaffMembers.filter(s => s.dept.includes(deptName) && s.id !== 'principal');
-      if (deptStaff.length === 0) return;
+    // 2. Department Banners and Staff
+    const departmentGroups = [
+      { banner: '*Department of CSE / IT & MCA*', match: (s) => ['CSE', 'IT', 'MCA', 'Admin'].includes(s.dept) },
+      { banner: '*Department of Artificial Intelligence & data science*', match: (s) => s.dept === 'AI&DS' },
+      { banner: '*Department of cyber security*', match: (s) => s.dept === 'Cyber Security' },
+      { banner: '*Department of Automobile*', match: (s) => s.dept === 'Automobile' },
+      { banner: '*Department of Civil*', match: (s) => s.dept === 'Civil' },
+      { banner: '*Department of ECE*', match: (s) => s.dept === 'ECE' },
+      { banner: '*Department of EEE*', match: (s) => s.dept === 'EEE' },
+      { banner: '*Department of MECH*', match: (s) => s.dept === 'Mech' },
+      { banner: '*Department of Science & Humanities (S&H)*', match: (s) => s.dept === 'S&H' },
+      { banner: '*COE*', match: (s) => s.dept === 'COE' },
+      { banner: '*EXAM CELL*', match: (s) => s.dept === 'Exam Cell' },
+      { banner: '*LIBRARIAN*', match: (s) => s.dept === 'Library' },
+      { banner: '*PLACEMENT CELL*', match: (s) => s.dept === 'Placement' },
+      { banner: '*ADMISSION CELL*', match: (s) => s.dept === 'Admission' },
+      { banner: '*OFFICE*', match: (s) => s.dept === 'Office' },
+      { banner: '*Department of MBA*', match: (s) => s.dept === 'MBA' },
+      { banner: null, match: (s) => s.dept === 'Yoga' },
+      { banner: '*PD*', match: (s) => ['PD', 'NCC', 'Idea Lab', 'FM Radio'].includes(s.dept) }
+    ];
 
-      const banner = worksheet.addRow([`*Department of ${deptName}*`]);
-      worksheet.mergeCells(`A${banner.number}:E${banner.number}`);
-      banner.font = { name: 'Times New Roman', bold: true, italic: true, size: 12 };
-      banner.alignment = { horizontal: 'center' };
-      banner.height = 28;
-      
-      deptStaff.forEach(staff => {
+    departmentGroups.forEach(grp => {
+      const groupStaff = staffList.filter(s => s.id !== 'principal' && !handledStaffIds.has(s.id) && grp.match(s));
+      if (groupStaff.length === 0) return;
+
+      if (grp.banner) {
+        const banner = worksheet.addRow([grp.banner]);
+        worksheet.mergeCells(`A${banner.number}:E${banner.number}`);
+        banner.font = { name: 'Times New Roman', bold: true, italic: true, size: 12 };
+        banner.alignment = { horizontal: 'center', vertical: 'middle' };
+        banner.height = 26;
+        banner.eachCell({ includeEmpty: true }, c => {
+          c.border = { top: { style: 'thin' }, left: { style: 'thin' }, bottom: { style: 'thin' }, right: { style: 'thin' } };
+        });
+      }
+
+      groupStaff.forEach(staff => {
+        handledStaffIds.add(staff.id);
         const rec = records.find(r => r.staff_id === staff.id);
-        const row = worksheet.addRow([gSNo++, `${staff.name} - ${staff.dept}`, rec ? rec.steps : 'ABSENT', rec ? (rec.uploaded_time || rec.time) : '', rec ? (rec.reason || '') : '']);
+        const stepVal = rec && rec.steps ? rec.steps : '';
+        const timeVal = rec && (rec.uploaded_time || rec.time) ? (rec.uploaded_time || rec.time) : '';
+        const remarksVal = rec ? (rec.steps < 5000 ? (rec.reason || 'LOW') : (rec.reason || '')) : 'PENDING';
+        if (!rec || !rec.steps) pendingStaffList.push(staff);
+
+        const row = worksheet.addRow([gSNo++, `${staff.name} - ${staff.dept}`, stepVal, timeVal, remarksVal]);
         applyDataStyle(row);
-        if (!rec) row.eachCell(c => c.font = { name: 'Times New Roman', color: { argb: 'FF94A3B8' } });
+        if (!rec || !rec.steps) {
+          row.getCell(5).font = { name: 'Times New Roman', size: 11, bold: true, color: { argb: 'FF991B1B' } };
+        } else if (rec.steps < 5000) {
+          row.getCell(3).font = { name: 'Times New Roman', size: 11, bold: true, color: { argb: 'FFDC2626' } };
+          row.getCell(5).font = { name: 'Times New Roman', size: 11, bold: true, color: { argb: 'FFDC2626' } };
+        }
       });
     });
 
-    // Summary at the Bottom
-    const total = allExpectedStaff ? allExpectedStaff.length : mockStaffMembers.length;
-    const present = records.length;
-    const absent = Math.max(0, total - present);
+    // 3. Catch-all for any extra departments added dynamically
+    const remainingStaff = staffList.filter(s => !handledStaffIds.has(s.id));
+    if (remainingStaff.length > 0) {
+      const banner = worksheet.addRow(['*Additional Staff*']);
+      worksheet.mergeCells(`A${banner.number}:E${banner.number}`);
+      banner.font = { name: 'Times New Roman', bold: true, italic: true, size: 12 };
+      banner.alignment = { horizontal: 'center', vertical: 'middle' };
+      banner.height = 26;
+
+      remainingStaff.forEach(staff => {
+        const rec = records.find(r => r.staff_id === staff.id);
+        const stepVal = rec && rec.steps ? rec.steps : '';
+        const timeVal = rec && (rec.uploaded_time || rec.time) ? (rec.uploaded_time || rec.time) : '';
+        const remarksVal = rec ? (rec.steps < 5000 ? (rec.reason || 'LOW') : (rec.reason || '')) : 'PENDING';
+        if (!rec || !rec.steps) pendingStaffList.push(staff);
+
+        const row = worksheet.addRow([gSNo++, `${staff.name} - ${staff.dept}`, stepVal, timeVal, remarksVal]);
+        applyDataStyle(row);
+        if (!rec || !rec.steps) {
+          row.getCell(5).font = { name: 'Times New Roman', size: 11, bold: true, color: { argb: 'FF991B1B' } };
+        } else if (rec.steps < 5000) {
+          row.getCell(3).font = { name: 'Times New Roman', size: 11, bold: true, color: { argb: 'FFDC2626' } };
+          row.getCell(5).font = { name: 'Times New Roman', size: 11, bold: true, color: { argb: 'FFDC2626' } };
+        }
+      });
+    }
+
+    // 4. Summary matching FITNESS SEPTEMBER 12.pdf
+    worksheet.addRow([]);
+    const presentCount = staffList.length - pendingStaffList.length;
+    const pendingCount = pendingStaffList.length;
+
+    const rPres = worksheet.addRow([`PRESENT ${presentCount}`]);
+    rPres.font = { name: 'Times New Roman', bold: true, size: 12 };
+    rPres.height = 22;
+
+    const rAbs = worksheet.addRow(['ABSENT NIL']);
+    rAbs.font = { name: 'Times New Roman', bold: true, size: 12 };
+    rAbs.height = 22;
+
+    const rPend = worksheet.addRow([`PENDING ${pendingCount}`]);
+    rPend.font = { name: 'Times New Roman', bold: true, size: 12, color: { argb: 'FF991B1B' } };
+    rPend.height = 22;
 
     worksheet.addRow([]);
-    const summaryHeader = worksheet.addRow(['ATTENDANCE SUMMARY']);
-    worksheet.mergeCells(`A${summaryHeader.number}:B${summaryHeader.number}`);
-    summaryHeader.font = { name: 'Times New Roman', bold: true, underline: true, size: 12 };
 
-    worksheet.addRow(['TOTAL STAFF', ':', total]).font = { name: 'Times New Roman', bold: true };
-    worksheet.addRow(['PRESENT', ':', present]).font = { name: 'Times New Roman', bold: true };
-    worksheet.addRow(['ABSENT', ':', absent]).font = { name: 'Times New Roman', bold: true };
-    worksheet.addRow(['PENDING', ':', absent]).font = { name: 'Times New Roman', bold: true, color: { argb: 'FFDC2626' } };
+    // 5. Numbered Pending Staff List (1. Mr. ... - Dept)
+    pendingStaffList.forEach((s, idx) => {
+      const pRow = worksheet.addRow([`${idx + 1}.${s.name} - ${s.dept}`]);
+      worksheet.mergeCells(`A${pRow.number}:E${pRow.number}`);
+      pRow.font = { name: 'Times New Roman', size: 11 };
+      pRow.alignment = { horizontal: 'left', indent: 1 };
+      pRow.height = 20;
+    });
 
     worksheet.addRow([]);
     worksheet.addRow([]);
-    const sig = worksheet.addRow(['', '', '', '', 'PRINCIPAL SIGNATURE']);
-    sig.getCell(5).font = { name: 'Times New Roman', bold: true };
-    worksheet.addRow(['', '', '', '', '____________________']);
 
-    // Dedicated Pending Staff worksheet in the same workbook
+    // 6. Principal Signature Block
+    const sigRow = worksheet.addRow(['', '', '', '', 'PRINCIPAL SIGNATURE']);
+    sigRow.getCell(5).font = { name: 'Times New Roman', bold: true, size: 11 };
+    sigRow.getCell(5).alignment = { horizontal: 'center' };
+    const lineRow = worksheet.addRow(['', '', '', '', '____________________']);
+    lineRow.getCell(5).alignment = { horizontal: 'center' };
+
+    // 7. Dedicated Secondary Worksheet: 'Pending Staff'
     const pendingSheet = workbook.addWorksheet('Pending Staff');
     pendingSheet.getColumn(1).width = 8;
     pendingSheet.getColumn(2).width = 18;
-    pendingSheet.getColumn(3).width = 40;
+    pendingSheet.getColumn(3).width = 42;
     pendingSheet.getColumn(4).width = 25;
     pendingSheet.getColumn(5).width = 22;
 
     const pTitle = pendingSheet.addRow([`PENDING / NOT SUBMITTED SCREENSHOT LIST - ${reportDateStr}`]);
     pendingSheet.mergeCells('A1:E1');
     pTitle.font = { name: 'Times New Roman', bold: true, size: 13, color: { argb: 'FF991B1B' } };
-    pTitle.alignment = { horizontal: 'center' };
+    pTitle.alignment = { horizontal: 'center', vertical: 'middle' };
     pTitle.height = 30;
 
     const pHeader = pendingSheet.addRow(['S.NO', 'STAFF ID', 'NAME AND DESIGNATION', 'DEPARTMENT', 'STATUS']);
@@ -334,120 +515,23 @@ const exportToExcelFull = async (records, title = 'Staff Step Count Report', sta
     });
     pHeader.height = 28;
 
-    let pSNo = 1;
-    const allStaffList = allExpectedStaff || mockStaffMembers;
-    allStaffList.forEach(staff => {
-      const rec = records.find(r => r.staff_id === staff.id);
-      if (!rec) {
-        const row = pendingSheet.addRow([pSNo++, staff.id, `${staff.name} - ${staff.dept}`, staff.dept, 'NOT SUBMITTED']);
-        row.eachCell(c => {
-          c.font = { name: 'Times New Roman', size: 11 };
-          c.border = { top: { style: 'thin' }, left: { style: 'thin' }, bottom: { style: 'thin' }, right: { style: 'thin' } };
-          c.alignment = { horizontal: 'left', vertical: 'middle', indent: 1 };
-        });
-        row.getCell(1).alignment = { horizontal: 'center' };
-        row.getCell(2).alignment = { horizontal: 'center' };
-        row.getCell(5).alignment = { horizontal: 'center' };
-        row.getCell(5).font = { name: 'Times New Roman', size: 11, bold: true, color: { argb: 'FFDC2626' } };
-        row.height = 22;
-      }
+    pendingStaffList.forEach((s, idx) => {
+      const row = pendingSheet.addRow([idx + 1, s.id, `${s.name} - ${s.dept}`, s.dept, 'NOT SUBMITTED']);
+      row.eachCell(c => {
+        c.font = { name: 'Times New Roman', size: 11 };
+        c.border = { top: { style: 'thin' }, left: { style: 'thin' }, bottom: { style: 'thin' }, right: { style: 'thin' } };
+        c.alignment = { horizontal: 'left', vertical: 'middle', indent: 1 };
+      });
+      row.getCell(1).alignment = { horizontal: 'center' };
+      row.getCell(2).alignment = { horizontal: 'center' };
+      row.getCell(5).alignment = { horizontal: 'center' };
+      row.getCell(5).font = { name: 'Times New Roman', size: 11, bold: true, color: { argb: 'FFDC2626' } };
+      row.height = 22;
     });
   }
 
   const buffer = await workbook.xlsx.writeBuffer();
   saveAs(new Blob([buffer]), `${title.replace(/\s+/g, '_')}.xlsx`);
-};
-
-const exportPendingListExcel = async (dateStr, allStaff, dayRecords) => {
-  const workbook = new ExcelJS.Workbook();
-  const worksheet = workbook.addWorksheet('Pending List');
-
-  worksheet.pageSetup.paperSize = 9; // A4
-  worksheet.pageSetup.orientation = 'portrait';
-  worksheet.pageSetup.fitToPage = true;
-  worksheet.pageSetup.fitToWidth = 1;
-  worksheet.pageSetup.fitToHeight = 0;
-  worksheet.pageSetup.margins = { left: 0.3, right: 0.3, top: 0.5, bottom: 0.5, header: 0.3, footer: 0.3 };
-
-  worksheet.getRow(1).height = 110;
-  worksheet.mergeCells('A1:E1');
-  try {
-    const headerResp = await fetch(header);
-    const headerBuf = await headerResp.arrayBuffer();
-    const headerId = workbook.addImage({ buffer: headerBuf, extension: 'png' });
-    worksheet.addImage(headerId, { tl: { col: 0, row: 0 }, ext: { width: 550, height: 110 } });
-  } catch (e) {
-    console.error("Header load failed", e);
-  }
-
-  const dayName = new Date(dateStr).toLocaleDateString('en-US', { weekday: 'long' }).toUpperCase();
-  const subTitles = [
-    "FACULTY WELFARE CLUB",
-    "FITNESS ACTIVITY ATTENDANCE - 2026",
-    `PENDING / NOT SUBMITTED SCREENSHOT LIST - ${dateStr} (${dayName})`
-  ];
-
-  subTitles.forEach((st, i) => {
-    const rowNum = i + 2;
-    worksheet.mergeCells(`A${rowNum}:E${rowNum}`);
-    const cell = worksheet.getCell(`A${rowNum}`);
-    cell.value = st;
-    cell.font = { name: 'Times New Roman', size: 12, bold: true, color: { argb: i === 2 ? 'FF991B1B' : 'FF000000' } };
-    cell.alignment = { horizontal: 'center' };
-    worksheet.getRow(rowNum).height = 20;
-  });
-
-  worksheet.getColumn(1).width = 8;   // S.NO
-  worksheet.getColumn(2).width = 16;  // STAFF ID
-  worksheet.getColumn(3).width = 40;  // NAME AND DESIGNATION
-  worksheet.getColumn(4).width = 25;  // DEPARTMENT
-  worksheet.getColumn(5).width = 25;  // STATUS
-
-  const headerRow = worksheet.getRow(6);
-  headerRow.values = ['S.NO', 'STAFF ID', 'STAFF NAME', 'DEPARTMENT', 'SUBMISSION STATUS'];
-  headerRow.eachCell(c => {
-    c.font = { name: 'Times New Roman', bold: true, size: 11, color: { argb: 'FFFFFFFF' } };
-    c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF991B1B' } };
-    c.border = { top: { style: 'thin' }, left: { style: 'thin' }, bottom: { style: 'thin' }, right: { style: 'thin' } };
-    c.alignment = { horizontal: 'center', vertical: 'middle' };
-  });
-  headerRow.height = 30;
-
-  const staffList = allStaff || mockStaffMembers;
-  const submittedIds = new Set(dayRecords.filter(r => r.date === dateStr && r.steps).map(r => r.staff_id));
-  const pendingStaff = staffList.filter(s => !submittedIds.has(s.id));
-
-  let curY = 7;
-  pendingStaff.forEach((s, idx) => {
-    const row = worksheet.addRow([idx + 1, s.id, `${s.name} - ${s.dept}`, s.dept, 'NOT SUBMITTED']);
-    row.eachCell(c => {
-      c.font = { name: 'Times New Roman', size: 11 };
-      c.border = { top: { style: 'thin' }, left: { style: 'thin' }, bottom: { style: 'thin' }, right: { style: 'thin' } };
-      c.alignment = { horizontal: 'left', vertical: 'middle', indent: 1 };
-    });
-    row.getCell(1).alignment = { horizontal: 'center' };
-    row.getCell(2).alignment = { horizontal: 'center' };
-    row.getCell(5).alignment = { horizontal: 'center' };
-    row.getCell(5).font = { name: 'Times New Roman', size: 11, bold: true, color: { argb: 'FFDC2626' } };
-    row.height = 22;
-  });
-
-  worksheet.addRow([]);
-  const sum1 = worksheet.addRow(['ATTENDANCE SUMMARY']);
-  worksheet.mergeCells(`A${sum1.number}:B${sum1.number}`);
-  sum1.font = { name: 'Times New Roman', bold: true, underline: true, size: 12 };
-  worksheet.addRow(['TOTAL STAFF', ':', staffList.length]).font = { name: 'Times New Roman', bold: true };
-  worksheet.addRow(['SUBMITTED', ':', submittedIds.size]).font = { name: 'Times New Roman', bold: true };
-  worksheet.addRow(['PENDING', ':', pendingStaff.length]).font = { name: 'Times New Roman', bold: true, color: { argb: 'FFDC2626' } };
-
-  worksheet.addRow([]);
-  worksheet.addRow([]);
-  const sig = worksheet.addRow(['', '', '', '', 'PRINCIPAL SIGNATURE']);
-  sig.getCell(5).font = { name: 'Times New Roman', bold: true };
-  worksheet.addRow(['', '', '', '', '____________________']);
-
-  const buffer = await workbook.xlsx.writeBuffer();
-  saveAs(new Blob([buffer]), `Pending_Staff_Report_${dateStr}.xlsx`);
 };
 
 
@@ -541,14 +625,16 @@ const StaffDashboard = ({ user }) => {
           .select('*')
           .eq('staff_id', user.id);
         
-        const staffPast = pastRecords.filter(r => r.staff_id === user.id);
+        const past = await getPastRecords();
+        const staffPast = past.filter(r => r.staff_id === user.id);
         const recordMap = new Map();
         staffPast.forEach(r => recordMap.set(r.date, r));
         (data || []).forEach(r => recordMap.set(r.date, r));
         setRecords(Array.from(recordMap.values()).sort((a,b) => new Date(b.date) - new Date(a.date)));
       } catch (err) {
         console.warn("Staff fetch fallback to past records:", err);
-        const staffPast = pastRecords.filter(r => r.staff_id === user.id);
+        const past = await getPastRecords();
+        const staffPast = past.filter(r => r.staff_id === user.id);
         setRecords(staffPast.sort((a,b) => new Date(b.date) - new Date(a.date)));
       } finally {
         setLoadingRecords(false);
@@ -641,10 +727,11 @@ const StaffDashboard = ({ user }) => {
         uploaded_time: result.uploadedTime,
         reason: (stepsNum < 5000 && !reason.trim()) ? 'Steps below daily target (< 5000)' : reason,
       };
+      saveOfflineRecord(localRec);
       setRecords(prev => [localRec, ...prev]);
       setFile(null);
       setResult(null);
-      alert("Submission saved successfully! (Note: Saved locally and will sync to cloud).");
+      alert("Submission saved locally! It will automatically sync to cloud when connected.");
     } finally {
       setLoading(false);
     }
@@ -871,8 +958,9 @@ const AdminDashboard = () => {
         }
           
         // Combine past records with any cloud records
+        const past = await getPastRecords();
         const recordMap = new Map();
-        pastRecords.forEach(r => recordMap.set(`${r.date}_${r.staff_id}`, r));
+        past.forEach(r => recordMap.set(`${r.date}_${r.staff_id}`, r));
         cloudData.forEach(r => recordMap.set(`${r.date}_${r.staff_id}`, r));
         const allFetched = Array.from(recordMap.values()).map(r => {
           const staff = mockStaffMembers.find(s => s.id === r.staff_id);
@@ -893,8 +981,9 @@ const AdminDashboard = () => {
         setRecords(allFetched.filter(r => r.date === selectedDate));
       } catch (err) {
         console.warn("Admin fetch fallback to past records:", err);
+        const past = await getPastRecords();
         const recordMap = new Map();
-        pastRecords.forEach(r => recordMap.set(`${r.date}_${r.staff_id}`, r));
+        past.forEach(r => recordMap.set(`${r.date}_${r.staff_id}`, r));
         const allFetched = Array.from(recordMap.values()).map(r => {
           const staff = mockStaffMembers.find(s => s.id === r.staff_id);
           return {
@@ -1234,18 +1323,22 @@ const AdminDashboard = () => {
             </button>
 
             <button
-              onClick={() => exportToExcelFull(exportRecords, `Daily Report - ${selectedDate}`, null, mockStaffMembers)}
-              className="btn-primary" style={{ padding: '0.5rem 1rem', height: '38px' }}
+              onClick={() => exportToExcelFull(records, `FITNESS ACTIVITY ATTENDANCE - ${selectedDate}`, null, mockStaffMembers, selectedDate)}
+              className="btn-primary"
+              style={{
+                padding: '0.5rem 1.25rem',
+                height: '38px',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '8px',
+                fontWeight: 600,
+                fontSize: '0.88rem',
+                boxShadow: '0 4px 10px rgba(37, 99, 235, 0.2)'
+              }}
+              title="Export complete daily attendance report in Excel format matching FITNESS SEPTEMBER 12.pdf"
             >
-              <FileSpreadsheet size={18} /> Export Filtered
-            </button>
-
-            <button
-              onClick={() => exportPendingListExcel(selectedDate, mockStaffMembers, records)}
-              className="btn-primary" style={{ padding: '0.5rem 1rem', height: '38px', background: '#dc2626', color: 'white', border: '1px solid #b91c1c' }}
-              title="Download Excel list of staff who have not submitted screenshot"
-            >
-              <AlertCircle size={18} /> Export Pending List
+              <FileSpreadsheet size={18} />
+              Export Attendance Report
             </button>
           </div>
         </div>
@@ -1415,6 +1508,13 @@ function App() {
     };
     window.addEventListener('beforeinstallprompt', handleBeforeInstall);
     return () => window.removeEventListener('beforeinstallprompt', handleBeforeInstall);
+  }, []);
+
+  useEffect(() => {
+    syncPendingRecords();
+    const handleOnline = () => syncPendingRecords();
+    window.addEventListener('online', handleOnline);
+    return () => window.removeEventListener('online', handleOnline);
   }, []);
 
   const handleInstallApp = async () => {
