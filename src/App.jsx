@@ -252,7 +252,7 @@ const exportToExcelFull = async (records, title = 'Staff Step Count Report', sta
 
   // Determine report date string
   const dateMatch = title.match(/\d{4}-\d{2}-\d{2}/);
-  const reportDateStr = targetDate || (staffMember && records[0] ? records[0].date : (dateMatch ? dateMatch[0] : new Date().toLocaleDateString('en-CA')));
+  const reportDateStr = targetDate || (staffMember && records[0] ? records[0].date : (dateMatch ? dateMatch[0] : getIstDateTime().date));
   
   // Format as DD.MM.YYYY and Day Name (e.g. 12.09.2026 - SATURDAY STEP COUNT NAMELIST)
   let dateFormatted = reportDateStr;
@@ -674,7 +674,7 @@ const StaffDashboard = ({ user }) => {
       return;
     }
 
-    const submissionDate = result.date || new Date().toLocaleDateString('en-CA');
+    const submissionDate = result.date || getIstDateTime().date;
     const alreadyUploaded = records.some(r => r.staff_id === user.id && r.date === submissionDate);
     if (alreadyUploaded) {
       alert(`You have already uploaded a screenshot for today (${submissionDate}). Only one screenshot per day is allowed.`);
@@ -755,7 +755,7 @@ const StaffDashboard = ({ user }) => {
     }
   };
 
-  const today = new Date().toLocaleDateString('en-CA');
+  const today = getIstDateTime().date;
   const todayRecord = records.find(r => r.staff_id === user.id && r.date === today);
   const hasUploadedToday = Boolean(todayRecord);
 
@@ -882,7 +882,7 @@ const StaffDashboard = ({ user }) => {
                 type="month"
                 value={selectedMonth}
                 onChange={(e) => setSelectedMonth(e.target.value)}
-                onClick={(e) => e.target.showPicker()}
+                onClick={(e) => e.target.showPicker?.()}
                 className="input-field"
                 style={{ marginBottom: 0, padding: '0.4rem', fontSize: '0.8rem', width: 'auto', cursor: 'pointer' }}
               />
@@ -923,19 +923,16 @@ const StaffDashboard = ({ user }) => {
 };
 
 const AdminDashboard = () => {
-  const [records, setRecords] = useState([]);
   const [all90DayRecords, setAll90DayRecords] = useState([]);
   const [duplicateAlerts, setDuplicateAlerts] = useState([]);
   const [loadingRecords, setLoadingRecords] = useState(false);
-  const latestPastDate = pastRecords && pastRecords.length > 0
-    ? pastRecords[pastRecords.length - 1].date
-    : new Date().toLocaleDateString('en-CA');
-  const [selectedDate, setSelectedDate] = useState(latestPastDate);
+  const [selectedDate, setSelectedDate] = useState(() => getIstDateTime().date);
   const [filterDept, setFilterDept] = useState('All');
   const [sortOrder, setSortOrder] = useState('time');
   const [filterDuplicatesOnly, setFilterDuplicatesOnly] = useState(false);
 
   useEffect(() => {
+    let isMounted = true;
     const fetchAdminRecords = async () => {
       setLoadingRecords(true);
       try {
@@ -967,7 +964,7 @@ const AdminDashboard = () => {
         // Combine past records with any cloud records
         const past = await getPastRecords();
         const recordMap = new Map();
-        past.forEach(r => recordMap.set(`${r.date}_${r.staff_id}`, r));
+        (past || []).forEach(r => recordMap.set(`${r.date}_${r.staff_id}`, r));
         cloudData.forEach(r => recordMap.set(`${r.date}_${r.staff_id}`, r));
         const allFetched = Array.from(recordMap.values()).map(r => {
           const staff = mockStaffMembers.find(s => s.id === r.staff_id);
@@ -978,19 +975,27 @@ const AdminDashboard = () => {
             dept: r.dept || staff?.dept || 'General'
           };
         });
+
+        if (!isMounted) return;
         setAll90DayRecords(allFetched);
 
         // Detect 90-day duplicate screenshot / step count alerts across all staff
         const alerts = findDuplicateAlertsInPeriod(allFetched, 90);
         setDuplicateAlerts(alerts);
 
-        // Filter records for current selected date view
-        setRecords(allFetched.filter(r => r.date === selectedDate));
+        // If today has no records yet, but past records exist, default to the latest date that has records
+        setSelectedDate(prev => {
+          if (!allFetched.some(r => r.date === prev) && allFetched.length > 0) {
+            const dates = [...new Set(allFetched.map(r => r.date))].sort();
+            return dates[dates.length - 1] || prev;
+          }
+          return prev;
+        });
       } catch (err) {
         console.warn("Admin fetch fallback to past records:", err);
         const past = await getPastRecords();
         const recordMap = new Map();
-        past.forEach(r => recordMap.set(`${r.date}_${r.staff_id}`, r));
+        (past || []).forEach(r => recordMap.set(`${r.date}_${r.staff_id}`, r));
         const allFetched = Array.from(recordMap.values()).map(r => {
           const staff = mockStaffMembers.find(s => s.id === r.staff_id);
           return {
@@ -1000,15 +1005,25 @@ const AdminDashboard = () => {
             dept: r.dept || staff?.dept || 'General'
           };
         });
+        if (!isMounted) return;
         setAll90DayRecords(allFetched);
         setDuplicateAlerts(findDuplicateAlertsInPeriod(allFetched, 90));
-        setRecords(allFetched.filter(r => r.date === selectedDate));
+        setSelectedDate(prev => {
+          if (!allFetched.some(r => r.date === prev) && allFetched.length > 0) {
+            const dates = [...new Set(allFetched.map(r => r.date))].sort();
+            return dates[dates.length - 1] || prev;
+          }
+          return prev;
+        });
       } finally {
-        setLoadingRecords(false);
+        if (isMounted) setLoadingRecords(false);
       }
     };
     fetchAdminRecords();
-  }, [selectedDate]);
+    return () => { isMounted = false; };
+  }, []);
+
+  const records = all90DayRecords.filter(r => r.date === selectedDate);
 
   const filteredRecords = records;
   const totalStaff = mockStaffMembers.length;
@@ -1083,7 +1098,6 @@ const AdminDashboard = () => {
         .eq('id', id);
 
       if (error) throw error;
-      setRecords(prev => prev.filter(r => r.id !== id));
       setAll90DayRecords(prev => prev.filter(r => r.id !== id));
       // Refresh duplicate alerts
       setDuplicateAlerts(prev => prev.filter(a => a.firstUploaded.id !== id && a.lastUploaded.id !== id));
@@ -1293,7 +1307,7 @@ const AdminDashboard = () => {
           <div style={{ display: 'flex', gap: '1rem', alignItems: 'flex-end', flexWrap: 'wrap' }}>
             <div>
               <label style={{ display: 'block', fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: '0.2rem' }}>Date</label>
-              <input type="date" value={selectedDate} onChange={(e) => setSelectedDate(e.target.value)} onClick={(e) => e.target.showPicker()} className="input-field" style={{ marginBottom: 0, width: 'auto', padding: '0.4rem', cursor: 'pointer' }} />
+              <input type="date" value={selectedDate} onChange={(e) => setSelectedDate(e.target.value)} onClick={(e) => e.target.showPicker?.()} className="input-field" style={{ marginBottom: 0, width: 'auto', padding: '0.4rem', cursor: 'pointer' }} />
             </div>
 
             <div>
