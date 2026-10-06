@@ -1,6 +1,6 @@
 
 import { describe, it, expect } from 'vitest';
-import { cleanText, tokenize, extractSteps, detect90DayDuplicates, findDuplicateAlertsInPeriod } from '../src/extractionLogic';
+import { cleanText, tokenize, extractSteps, detect90DayDuplicates, findDuplicateAlertsInPeriod, getIstDateTime } from '../src/extractionLogic';
 
 describe('Step Count Extraction Logic', () => {
 
@@ -269,6 +269,69 @@ describe('90-Day Duplicate Step Count Detection System', () => {
     expect(alerts[0].lastUploaded.date).toBe('2026-08-28');
     expect(alerts[0].lastUploaded.timestampStr).toBe('2026-08-28 at 11:30 AM');
     expect(alerts[0].daysDifference).toBe(27);
+  });
+
+  it('should exclude same-day submissions from 90-day repeat check', () => {
+    const records = [
+      { id: 10, staff_id: 'cse001', steps: 7500, date: '2026-09-15', uploaded_time: '09:00 AM' }
+    ];
+    const sameDaySubmission = {
+      id: 11,
+      staff_id: 'cse001',
+      steps: 7500,
+      date: '2026-09-15',
+      uploaded_time: '09:30 AM'
+    };
+    const result = detect90DayDuplicates(sameDaySubmission, records, 90);
+    expect(result.isDuplicate).toBe(false);
+  });
+
+  it('should exclude future-dated records from becoming repeat matches', () => {
+    const records = [
+      { id: 20, staff_id: 'cse001', steps: 8000, date: '2026-09-20', uploaded_time: '09:00 AM' }
+    ];
+    const earlierSubmission = {
+      staff_id: 'cse001',
+      steps: 8000,
+      date: '2026-09-10', // Submitted on 10th; record on 20th is in the future
+      uploaded_time: '09:00 AM'
+    };
+    const result = detect90DayDuplicates(earlierSubmission, records, 90);
+    expect(result.isDuplicate).toBe(false);
+  });
+
+  it('should enforce inclusive 90-day lower boundary and exclusive current date', () => {
+    // 90 days exactly before 2026-09-30 is 2026-07-02
+    const records = [
+      { id: 31, staff_id: 'cse001', steps: 9100, date: '2026-07-02', uploaded_time: '08:00 AM' }, // exactly 90 days
+      { id: 32, staff_id: 'cse001', steps: 9200, date: '2026-07-01', uploaded_time: '08:00 AM' }  // 91 days (outside)
+    ];
+
+    const submission90 = {
+      staff_id: 'cse001',
+      steps: 9100,
+      date: '2026-09-30'
+    };
+    const res90 = detect90DayDuplicates(submission90, records, 90);
+    expect(res90.isDuplicate).toBe(true);
+
+    const submission91 = {
+      staff_id: 'cse001',
+      steps: 9200,
+      date: '2026-09-30'
+    };
+    const res91 = detect90DayDuplicates(submission91, records, 90);
+    expect(res91.isDuplicate).toBe(false);
+  });
+});
+
+describe('Asia/Kolkata (IST) Timezone Generation', () => {
+  it('should generate formatted IST date and time', () => {
+    const { date, time, uploadedTime } = getIstDateTime(new Date('2026-10-06T12:00:00Z'));
+    expect(date).toBe('2026-10-06');
+    // UTC 12:00 is IST 17:30
+    expect(time).toBe('17:30');
+    expect(uploadedTime).toContain('05:30:00 PM');
   });
 });
 

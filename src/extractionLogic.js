@@ -242,8 +242,21 @@ export const extractSteps = (tokens) => {
 };
 
 /**
- * Checks if a step submission has an identical step count recorded in the last N days (default 90 days)
- * by the SAME staff member (same staff repeating the value is considered duplicate).
+ * Generates date and time formatted in Asia/Kolkata (Indian Standard Time).
+ */
+export const getIstDateTime = (dateObj = new Date()) => {
+  const date = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata', year: 'numeric', month: '2-digit', day: '2-digit' }).format(dateObj);
+  const time = new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit', hour12: false }).format(dateObj);
+  const uploadedTime = new Intl.DateTimeFormat('en-US', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true }).format(dateObj);
+  return { date, time, uploadedTime };
+};
+
+/**
+ * Checks if a step submission has an identical step count recorded in the previous 90-day calendar window
+ * by the SAME staff member.
+ * - Restricted to the same staff_id.
+ * - Previous-90-day window is calendar-date based: inclusive lower boundary, exclusive current date.
+ * - Same-day submissions and future-dated records are excluded from repeat matching.
  */
 export const detect90DayDuplicates = (newRecord, existingRecords, windowDays = 90) => {
   if (!newRecord || !newRecord.steps || !Array.isArray(existingRecords)) {
@@ -251,26 +264,31 @@ export const detect90DayDuplicates = (newRecord, existingRecords, windowDays = 9
   }
 
   const newStaffId = newRecord.staff_id || newRecord.staffId;
-  const targetDate = newRecord.date ? new Date(newRecord.date) : new Date();
+  const targetDateStr = newRecord.date || getIstDateTime().date;
+  const targetMidnight = new Date(`${targetDateStr}T00:00:00Z`);
   const msInDay = 1000 * 60 * 60 * 24;
 
   const matches = existingRecords.filter(rec => {
     const recStaffId = rec.staff_id || rec.staffId;
-    // Only considered duplicate if the submission is from the SAME staff member
+    // 1. Only considered duplicate if the submission is from the SAME staff member
     if (!newStaffId || recStaffId !== newStaffId) return false;
 
-    // Exclude exact same submission record if re-checking
+    // 2. Exclude exact same submission record if re-checking
     if (rec.id && newRecord.id && rec.id === newRecord.id) return false;
-    // Exclude same date (same date submission is guarded by daily lock)
-    if (rec.date === newRecord.date) return false;
 
-    // Check step count equality
+    // 3. Same-day submissions are excluded from the 90-day repeat check
+    if (rec.date === targetDateStr) return false;
+
+    // 4. Check step count equality
     if (Number(rec.steps) !== Number(newRecord.steps)) return false;
 
-    // Check 90-day window
-    const recDate = new Date(rec.date);
-    const dayDiff = Math.abs((targetDate - recDate) / msInDay);
-    return dayDiff <= windowDays;
+    // 5. Calendar-date based 90-day window:
+    // Future-dated records cannot become repeat matches (dayDiff <= 0)
+    // Inclusive lower boundary (dayDiff <= windowDays)
+    // Exclusive current date (dayDiff > 0)
+    const recMidnight = new Date(`${rec.date}T00:00:00Z`);
+    const dayDiff = Math.round((targetMidnight - recMidnight) / msInDay);
+    return dayDiff > 0 && dayDiff <= windowDays;
   });
 
   return {
@@ -288,21 +306,23 @@ export const detect90DayDuplicates = (newRecord, existingRecords, windowDays = 9
 };
 
 /**
- * Scans all step records and returns alerts for any step counts repeated by the SAME staff member in the last 90 days.
+ * Scans all step records and returns alerts for any step counts repeated by the SAME staff member
+ * in the previous 90-day calendar window.
  */
 export const findDuplicateAlertsInPeriod = (allRecords, windowDays = 90) => {
   if (!Array.isArray(allRecords) || allRecords.length === 0) return [];
 
   const alerts = [];
-  const now = new Date();
+  const todayStr = getIstDateTime().date;
+  const todayMidnight = new Date(`${todayStr}T00:00:00Z`);
   const msInDay = 1000 * 60 * 60 * 24;
 
-  // Filter records within last 90 days
+  // Filter records within previous 90-day window up to today (excludes future dates)
   const recentRecords = allRecords.filter(r => {
-    if (!r.date) return false;
-    const recDate = new Date(r.date);
-    const daysAgo = (now - recDate) / msInDay;
-    return daysAgo >= -1 && daysAgo <= windowDays; // Includes today & up to 90 days prior
+    if (!r.date || !r.steps) return false;
+    const recMidnight = new Date(`${r.date}T00:00:00Z`);
+    const dayDiff = Math.round((todayMidnight - recMidnight) / msInDay);
+    return dayDiff >= 0 && dayDiff <= windowDays;
   });
 
   // Group records by staffId first, then by step count for that same staff
@@ -317,69 +337,76 @@ export const findDuplicateAlertsInPeriod = (allRecords, windowDays = 90) => {
     staffStepGroups[staffId][stepsKey].push(rec);
   });
 
-  // Identify duplicate occurrences (same staff member submitted identical step count on different dates)
+  // Identify duplicate occurrences (same staff member submitted identical step count on DIFFERENT dates)
   Object.keys(staffStepGroups).forEach(staffId => {
     const stepGroups = staffStepGroups[staffId];
     Object.keys(stepGroups).forEach(stepsStr => {
-      const group = stepGroups[stepsStr];
-      // Only considered duplicate if the SAME staff member uploaded this step count on multiple dates
-      if (group.length > 1) {
+      const recordsWithSameSteps = stepGroups[stepsStr];
+      // De-duplicate by date so multiple records on the same day don't count as 90-day repeats
+      const dateMap = new Map();
+      recordsWithSameSteps.forEach(r => {
+        if (!dateMap.has(r.date)) dateMap.set(r.date, r);
+      });
+      const uniqueDateRecords = Array.from(dateMap.values());
+
+      if (uniqueDateRecords.length > 1) {
         // Sort chronologically ascending (oldest first, newest last)
-        group.sort((a, b) => new Date(a.date) - new Date(b.date));
+        uniqueDateRecords.sort((a, b) => new Date(`${a.date}T00:00:00Z`) - new Date(`${b.date}T00:00:00Z`));
 
-        const firstRecord = group[0];
-        const lastRecord = group[group.length - 1];
+        const firstRecord = uniqueDateRecords[0];
+        const lastRecord = uniqueDateRecords[uniqueDateRecords.length - 1];
 
-        // Calculate date difference in days
-        const firstDate = new Date(firstRecord.date);
-        const lastDate = new Date(lastRecord.date);
-        const daysDifference = Math.round(Math.abs((lastDate - firstDate) / msInDay));
+        const firstDate = new Date(`${firstRecord.date}T00:00:00Z`);
+        const lastDate = new Date(`${lastRecord.date}T00:00:00Z`);
+        const daysDifference = Math.round((lastDate - firstDate) / msInDay);
 
-        alerts.push({
-          id: `dup-${staffId}-${lastRecord.date}-${stepsStr}`,
-          staffId,
-          staff_id: staffId,
-          name: lastRecord.name || firstRecord.name,
-          dept: lastRecord.dept || firstRecord.dept,
-          steps: Number(stepsStr),
-          isSameStaff: true,
-          daysDifference,
-          uploaderStaffIds: [staffId],
-          firstUploaded: {
-            id: firstRecord.id,
+        if (daysDifference > 0 && daysDifference <= windowDays) {
+          alerts.push({
+            id: `dup-${staffId}-${lastRecord.date}-${stepsStr}`,
             staffId,
             staff_id: staffId,
-            name: firstRecord.name,
-            dept: firstRecord.dept,
-            date: firstRecord.date,
-            time: firstRecord.uploaded_time || firstRecord.time || 'N/A',
-            timestampStr: `${firstRecord.date} at ${firstRecord.uploaded_time || firstRecord.time || 'N/A'}`
-          },
-          lastUploaded: {
-            id: lastRecord.id,
-            staffId,
-            staff_id: staffId,
-            name: lastRecord.name,
-            dept: lastRecord.dept,
-            date: lastRecord.date,
-            time: lastRecord.uploaded_time || lastRecord.time || 'N/A',
-            timestampStr: `${lastRecord.date} at ${lastRecord.uploaded_time || lastRecord.time || 'N/A'}`
-          },
-          allMatchedRecords: group.map(g => ({
-            id: g.id,
-            staffId,
-            staff_id: staffId,
-            name: g.name,
-            dept: g.dept,
-            date: g.date,
-            time: g.uploaded_time || g.time || 'N/A'
-          }))
-        });
+            name: lastRecord.name || firstRecord.name,
+            dept: lastRecord.dept || firstRecord.dept,
+            steps: Number(stepsStr),
+            isSameStaff: true,
+            daysDifference,
+            uploaderStaffIds: [staffId],
+            firstUploaded: {
+              id: firstRecord.id,
+              staffId,
+              staff_id: staffId,
+              name: firstRecord.name,
+              dept: firstRecord.dept,
+              date: firstRecord.date,
+              time: firstRecord.uploaded_time || firstRecord.time || 'N/A',
+              timestampStr: `${firstRecord.date} at ${firstRecord.uploaded_time || firstRecord.time || 'N/A'}`
+            },
+            lastUploaded: {
+              id: lastRecord.id,
+              staffId,
+              staff_id: staffId,
+              name: lastRecord.name,
+              dept: lastRecord.dept,
+              date: lastRecord.date,
+              time: lastRecord.uploaded_time || lastRecord.time || 'N/A',
+              timestampStr: `${lastRecord.date} at ${lastRecord.uploaded_time || lastRecord.time || 'N/A'}`
+            },
+            allMatchedRecords: uniqueDateRecords.map(g => ({
+              id: g.id,
+              staffId,
+              staff_id: staffId,
+              name: g.name,
+              dept: g.dept,
+              date: g.date,
+              time: g.uploaded_time || g.time || 'N/A'
+            }))
+          });
+        }
       }
     });
   });
 
-  return alerts.sort((a, b) => new Date(b.lastUploaded.date) - new Date(a.lastUploaded.date));
+  return alerts.sort((a, b) => new Date(`${b.lastUploaded.date}T00:00:00Z`) - new Date(`${a.lastUploaded.date}T00:00:00Z`));
 };
 
 

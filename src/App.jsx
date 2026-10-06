@@ -25,7 +25,7 @@ import ExcelJS from 'exceljs';
 import { saveAs } from 'file-saver';
 import { mockStaffMembers, ADMIN_CREDENTIALS } from './data';
 import { supabase } from './supabaseClient';
-import { cleanText, tokenize, extractSteps, detect90DayDuplicates, findDuplicateAlertsInPeriod } from './extractionLogic';
+import { cleanText, tokenize, extractSteps, detect90DayDuplicates, findDuplicateAlertsInPeriod, getIstDateTime } from './extractionLogic';
 import logo from './assets/logo.png';
 import header from './assets/header.png';
 
@@ -55,9 +55,20 @@ const syncPendingRecords = async () => {
     if (!queue || queue.length === 0) return;
     const remaining = [];
     for (const rec of queue) {
+      // Omit local-only ID before upload so Supabase can generate standard database IDs
       const { id, ...cleanRec } = rec;
       const { error } = await supabase.from('step_records').insert([cleanRec]);
-      if (error) remaining.push(rec);
+      // If error is unique constraint conflict, treat as already synchronized
+      if (error) {
+        const isConflict = error.code === '23505' || 
+          error.message?.includes('duplicate key') || 
+          error.message?.includes('unique constraint');
+        if (isConflict) {
+          console.log(`Record for ${cleanRec.staff_id} on ${cleanRec.date} already in database; treated as synchronized.`);
+        } else {
+          remaining.push(rec);
+        }
+      }
     }
     localStorage.setItem('pending_sync_records', JSON.stringify(remaining));
   } catch (e) {
@@ -224,11 +235,7 @@ const processScreenshot = async (image) => {
     }
   }
 
-  const now = new Date();
-  const date = now.toLocaleDateString('en-CA');
-  const time = now.toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit' });
-  const uploadedTime = now.toLocaleTimeString('en-US', { hour12: true, hour: '2-digit', minute: '2-digit', second: '2-digit' });
-
+  const { date, time, uploadedTime } = getIstDateTime();
   return { steps, date, time, uploadedTime };
 };
 
@@ -932,10 +939,10 @@ const AdminDashboard = () => {
     const fetchAdminRecords = async () => {
       setLoadingRecords(true);
       try {
-        // Calculate 90 days ago cutoff date string
+        // Calculate 90 days ago cutoff date string using IST calendar dates
         const ninetyDaysAgo = new Date();
         ninetyDaysAgo.setDate(ninetyDaysAgo.getDate() - 90);
-        const cutoffStr = ninetyDaysAgo.toISOString().substring(0, 10);
+        const cutoffStr = getIstDateTime(ninetyDaysAgo).date;
 
         // Paginate fetching to overcome Supabase PostgREST default 1,000-row limit
         let cloudData = [];
@@ -1005,7 +1012,9 @@ const AdminDashboard = () => {
 
   const filteredRecords = records;
   const totalStaff = mockStaffMembers.length;
-  const completedToday = new Set(filteredRecords.filter(r => r.steps >= 5000 || r.reason).map(r => r.staff_id)).size;
+  // Pending and submitted counts based strictly on whether a staff member has a record for the selected date
+  const submittedToday = new Set(filteredRecords.map(r => r.staff_id)).size;
+  const pendingToday = Math.max(0, totalStaff - submittedToday);
 
   const departments = ['All', ...new Set(mockStaffMembers.map(s => s.dept))];
 
@@ -1013,9 +1022,14 @@ const AdminDashboard = () => {
   const duplicateStaffIds = new Set(duplicateAlerts.map(a => a.staffId || a.staff_id));
 
   // Set of staff IDs that have a repeated step count specifically on the currently selected date
+  // Tied to the alert's actual submission dates, preventing an old alert from incorrectly flagging a different selected-day record
   const selectedDateDuplicateStaffIds = new Set(
     filteredRecords
-      .filter(r => duplicateAlerts.some(a => a.steps === r.steps && (a.staffId === r.staff_id || a.staff_id === r.staff_id)))
+      .filter(r => duplicateAlerts.some(a => 
+        (a.staffId === r.staff_id || a.staff_id === r.staff_id) && 
+        a.steps === r.steps && 
+        (a.lastUploaded.date === selectedDate || a.allMatchedRecords.some(m => m.date === selectedDate))
+      ))
       .map(r => r.staff_id)
   );
 
@@ -1093,12 +1107,12 @@ const AdminDashboard = () => {
           <h1 className="title-gradient">{totalStaff}</h1>
         </div>
         <div className="glass-card" style={{ textAlign: 'center' }}>
-          <h4 style={{ color: 'var(--text-muted)', marginBottom: '0.5rem' }}>Completed Today</h4>
-          <h1 style={{ color: 'var(--success)' }}>{completedToday}</h1>
+          <h4 style={{ color: 'var(--text-muted)', marginBottom: '0.5rem' }}>Submitted</h4>
+          <h1 style={{ color: 'var(--success)' }}>{submittedToday}</h1>
         </div>
         <div className="glass-card" style={{ textAlign: 'center' }}>
-          <h4 style={{ color: 'var(--text-muted)', marginBottom: '0.5rem' }}>Incomplete</h4>
-          <h1 style={{ color: 'var(--accent)' }}>{totalStaff - completedToday}</h1>
+          <h4 style={{ color: 'var(--text-muted)', marginBottom: '0.5rem' }}>Pending</h4>
+          <h1 style={{ color: 'var(--accent)' }}>{pendingToday}</h1>
         </div>
         <div 
           onClick={() => setFilterDuplicatesOnly(prev => !prev)}
